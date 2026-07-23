@@ -1,19 +1,138 @@
-import type { Profile } from "../types";
+import { useEffect, useState } from "react";
+import type { Drill, Profile, Team } from "../types";
+import { assignDrill, getDrills, getMyTeam, getRoster } from "../lib/teams";
 import RosterList from "../components/RosterList";
 
-export default function CoachDashboard({ profile: _profile }: { profile: Profile }) {
-  // TODO: load roster + per-player assignment/upload/analysis summaries from Supabase.
+export default function CoachDashboard({ profile }: { profile: Profile }) {
+  const [team, setTeam] = useState<Team | null>(null);
+  const [roster, setRoster] = useState<Profile[]>([]);
+  const [drills, setDrills] = useState<Drill[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  const [selectedDrillId, setSelectedDrillId] = useState("");
+  const [scope, setScope] = useState<"team" | "players">("team");
+  const [selectedPlayerIds, setSelectedPlayerIds] = useState<string[]>([]);
+  const [assignError, setAssignError] = useState<string | null>(null);
+  const [assignSuccess, setAssignSuccess] = useState<string | null>(null);
+
+  useEffect(() => {
+    void loadData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile.team_id]);
+
+  async function loadData() {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [teamData, drillsData] = await Promise.all([getMyTeam(profile), getDrills()]);
+      setTeam(teamData);
+      setDrills(drillsData);
+      if (teamData) {
+        setRoster(await getRoster(teamData.id));
+      }
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Failed to load dashboard data.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleCopyInviteCode() {
+    if (!team) return;
+    await navigator.clipboard.writeText(team.invite_code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  function togglePlayer(playerId: string) {
+    setSelectedPlayerIds((prev) =>
+      prev.includes(playerId) ? prev.filter((id) => id !== playerId) : [...prev, playerId]
+    );
+  }
+
+  async function handleAssign(e: React.FormEvent) {
+    e.preventDefault();
+    setAssignError(null);
+    setAssignSuccess(null);
+    if (!team || !selectedDrillId) return;
+    try {
+      await assignDrill({
+        drillId: selectedDrillId,
+        teamId: team.id,
+        playerIds: scope === "players" ? selectedPlayerIds : [],
+      });
+      setAssignSuccess(
+        scope === "team" ? "Assigned to the whole team." : `Assigned to ${selectedPlayerIds.length} player(s).`
+      );
+      setSelectedPlayerIds([]);
+      setSelectedDrillId("");
+    } catch (err) {
+      setAssignError(err instanceof Error ? err.message : "Failed to assign drill.");
+    }
+  }
+
+  if (loading) return <p>Loading...</p>;
+  if (loadError) return <p style={{ color: "#f87171" }}>{loadError}</p>;
+
   return (
     <div>
       <h1>Coach Dashboard</h1>
       <div className="card">
         <h2>Roster</h2>
-        <RosterList players={[]} />
-        <button>Copy invite code (stub)</button>
+        <RosterList players={roster} />
+        {team && (
+          <>
+            <p>
+              Invite code: <strong>{team.invite_code}</strong>
+            </p>
+            <button onClick={handleCopyInviteCode}>{copied ? "Copied!" : "Copy invite code"}</button>
+          </>
+        )}
       </div>
       <div className="card">
         <h2>Assign a drill</h2>
-        <p>TODO: pick a drill from the library and assign to the whole team or individual players.</p>
+        {drills.length === 0 ? (
+          <p>No drills in the library yet.</p>
+        ) : (
+          <form onSubmit={handleAssign}>
+            <select value={selectedDrillId} onChange={(e) => setSelectedDrillId(e.target.value)} required>
+              <option value="" disabled>
+                Select a drill
+              </option>
+              {drills.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.title} ({d.skill_category})
+                </option>
+              ))}
+            </select>
+            <select value={scope} onChange={(e) => setScope(e.target.value as "team" | "players")}>
+              <option value="team">Whole team</option>
+              <option value="players">Specific players</option>
+            </select>
+            {scope === "players" && (
+              <div>
+                {roster.length === 0 && <p>No players on the roster yet.</p>}
+                {roster.map((p) => (
+                  <label key={p.id} style={{ display: "block" }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedPlayerIds.includes(p.id)}
+                      onChange={() => togglePlayer(p.id)}
+                    />{" "}
+                    {p.name}
+                  </label>
+                ))}
+              </div>
+            )}
+            {assignError && <p style={{ color: "#f87171" }}>{assignError}</p>}
+            {assignSuccess && <p style={{ color: "#4ade80" }}>{assignSuccess}</p>}
+            <button type="submit" disabled={scope === "players" && selectedPlayerIds.length === 0}>
+              Assign
+            </button>
+          </form>
+        )}
       </div>
     </div>
   );

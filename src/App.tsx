@@ -12,6 +12,7 @@ import DrillLibrary from "./pages/DrillLibrary";
 import DrillDetail from "./pages/DrillDetail";
 import PlayerProgress from "./pages/PlayerProgress";
 import ReferenceProfiles from "./pages/ReferenceProfiles";
+import GameFilm from "./pages/GameFilm";
 
 export default function App() {
   const [profile, setProfile] = useState<Profile | null>(getSession());
@@ -60,8 +61,15 @@ export default function App() {
           />
           <Route
             path="/reference-profiles"
-            element={profile ? <ReferenceProfiles profile={profile} /> : <Navigate to="/login" />}
+            element={
+              profile ? (
+                <ReferenceProfiles profile={profile} onProfileUpdated={handleAuthed} />
+              ) : (
+                <Navigate to="/login" />
+              )
+            }
           />
+          <Route path="/game-film" element={profile ? <GameFilm profile={profile} /> : <Navigate to="/login" />} />
           <Route path="/" element={<Navigate to={profile ? home : "/login"} />} />
         </Routes>
       </main>

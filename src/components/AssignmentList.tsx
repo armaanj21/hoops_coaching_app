@@ -1,7 +1,6 @@
-import type { Assignment } from "../types";
+import type { AssignmentWithDrill } from "../lib/teams";
 
-// TODO: fetch real assignments from the `assignments` table once Supabase is wired up.
-export default function AssignmentList({ assignments }: { assignments: Assignment[] }) {
+export default function AssignmentList({ assignments }: { assignments: AssignmentWithDrill[] }) {
   if (assignments.length === 0) {
     return <p>No drills assigned yet.</p>;
   }
@@ -10,7 +9,8 @@ export default function AssignmentList({ assignments }: { assignments: Assignmen
     <ul>
       {assignments.map((a) => (
         <li key={a.id}>
-          Drill {a.drill_id} — {a.status}
+          {a.drills?.title ?? "Drill"} — {a.status}
+          {a.team_id && " (whole team)"}
         </li>
       ))}
     </ul>

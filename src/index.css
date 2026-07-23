@@ -56,3 +56,20 @@ input, select, textarea {
   background: #0f172a;
   color: #f8fafc;
 }
+
+.game-film-result {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.game-film-result > * {
+  flex: 1 1 280px;
+}
+
+.game-film-video {
+  width: 100%;
+  max-width: 480px;
+  border-radius: 0.5rem;
+}

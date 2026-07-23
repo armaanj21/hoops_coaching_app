@@ -11,6 +11,7 @@ export default function NavBar({ profile, onLogOut }: { profile: Profile; onLogO
         <Link to="/drills">Drills</Link>
         {profile.role === "player" && <Link to="/progress">Progress</Link>}
         <Link to="/reference-profiles">Reference Profiles</Link>
+        <Link to="/game-film">Game Film</Link>
         {profile.role === "player" && !profile.team_id && <Link to="/join">Join Team</Link>}
       </nav>
       <div>
