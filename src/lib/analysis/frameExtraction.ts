@@ -58,12 +58,31 @@ export class FrameExtractionTimeoutError extends Error {
   }
 }
 
+function removeVideo(video: HTMLVideoElement): void {
+  video.pause();
+  video.removeAttribute("src");
+  video.load();
+  video.remove();
+}
+
 async function loadVideo(videoUrl: string): Promise<HTMLVideoElement> {
   const video = document.createElement("video");
   video.crossOrigin = "anonymous";
   video.muted = true;
   video.playsInline = true;
   video.preload = "auto";
+  // WebKit/Safari is known to be unreliable about seeking (and sometimes even fully loading) a
+  // <video> element that was never attached to the document — seeks can simply never fire
+  // `seeked`, which is exactly the timeout confirmed on a real device after the load-stage bug was
+  // fixed. Chrome tolerates detached video elements fine, which is why this never showed up in
+  // desktop testing. Kept out of the visible layout (not display:none, which some engines also
+  // treat as "don't bother decoding") via offscreen positioning instead.
+  video.style.position = "fixed";
+  video.style.top = "-9999px";
+  video.style.left = "-9999px";
+  video.style.width = "1px";
+  video.style.height = "1px";
+  document.body.appendChild(video);
   video.src = videoUrl;
   console.log("[frame-extraction] loading video", { videoUrl: videoUrl.slice(0, 60) });
 
@@ -150,18 +169,22 @@ function makeCanvas(video: HTMLVideoElement): { canvas: HTMLCanvasElement; ctx: 
 
 export async function extractFrames(videoUrl: string, count = 3): Promise<string[]> {
   const video = await loadVideo(videoUrl);
-  const { canvas, ctx } = makeCanvas(video);
-  const duration = video.duration;
-  const frames: string[] = [];
+  try {
+    const { canvas, ctx } = makeCanvas(video);
+    const duration = video.duration;
+    const frames: string[] = [];
 
-  for (let i = 0; i < count; i++) {
-    const t = (duration * (i + 1)) / (count + 1);
-    await seekTo(video, t);
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    frames.push(canvas.toDataURL("image/jpeg", 0.8).split(",")[1]);
+    for (let i = 0; i < count; i++) {
+      const t = (duration * (i + 1)) / (count + 1);
+      await seekTo(video, t);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      frames.push(canvas.toDataURL("image/jpeg", 0.8).split(",")[1]);
+    }
+
+    return frames;
+  } finally {
+    removeVideo(video);
   }
-
-  return frames;
 }
 
 // Extracts a single frame, defaulting to an early point in the clip (clear of any startup black
@@ -172,15 +195,19 @@ export async function extractFrameAt(
   time?: number
 ): Promise<{ base64: string; width: number; height: number; duration: number; time: number }> {
   const video = await loadVideo(videoUrl);
-  const { canvas, ctx } = makeCanvas(video);
-  const duration = video.duration;
-  const t = time ?? duration * 0.2;
+  try {
+    const { canvas, ctx } = makeCanvas(video);
+    const duration = video.duration;
+    const t = time ?? duration * 0.2;
 
-  await seekTo(video, t);
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-  const base64 = canvas.toDataURL("image/jpeg", 0.9).split(",")[1];
+    await seekTo(video, t);
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const base64 = canvas.toDataURL("image/jpeg", 0.9).split(",")[1];
 
-  return { base64, width: canvas.width, height: canvas.height, duration, time: t };
+    return { base64, width: canvas.width, height: canvas.height, duration, time: t };
+  } finally {
+    removeVideo(video);
+  }
 }
 
 // Samples frames clustered close in time around a reference point (rather than spread evenly
@@ -193,20 +220,24 @@ export async function extractFramesNear(
   spreadSeconds = 2
 ): Promise<{ frames: string[]; width: number; height: number }> {
   const video = await loadVideo(videoUrl);
-  const { canvas, ctx } = makeCanvas(video);
-  const duration = video.duration;
-  const start = Math.max(0, centerTime - spreadSeconds);
-  const end = Math.min(duration, centerTime + spreadSeconds);
-  const frames: string[] = [];
+  try {
+    const { canvas, ctx } = makeCanvas(video);
+    const duration = video.duration;
+    const start = Math.max(0, centerTime - spreadSeconds);
+    const end = Math.min(duration, centerTime + spreadSeconds);
+    const frames: string[] = [];
 
-  for (let i = 0; i < count; i++) {
-    const t = count === 1 ? centerTime : start + ((end - start) * i) / (count - 1);
-    await seekTo(video, t);
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    frames.push(canvas.toDataURL("image/jpeg", 0.8).split(",")[1]);
+    for (let i = 0; i < count; i++) {
+      const t = count === 1 ? centerTime : start + ((end - start) * i) / (count - 1);
+      await seekTo(video, t);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      frames.push(canvas.toDataURL("image/jpeg", 0.8).split(",")[1]);
+    }
+
+    return { frames, width: canvas.width, height: canvas.height };
+  } finally {
+    removeVideo(video);
   }
-
-  return { frames, width: canvas.width, height: canvas.height };
 }
 
 // Draws a visible box directly onto a frame so the model sees an unambiguous visual marker,
