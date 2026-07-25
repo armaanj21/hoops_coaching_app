@@ -1,16 +1,16 @@
 import { useRef, useState } from "react";
-import { analysisClient } from "../lib/analysis/claudeAnalysisClient";
-import { getReferenceProfileByName, uploadDrillVideo } from "../lib/uploads";
+import { uploadTeamFilm } from "../lib/teamFilm";
+import { analyzeTeamFilm } from "../lib/analysis/teamFilmAnalysisClient";
 import { MAX_UPLOAD_MB } from "../lib/storagePath";
 import { CompressionInsufficientError, compressVideo, needsCompression } from "../lib/videoCompression";
 
-export default function UploadButton({
-  drillId,
-  playerId,
+export default function TeamFilmUploadButton({
+  teamId,
+  coachId,
   onDone,
 }: {
-  drillId: string;
-  playerId: string;
+  teamId: string;
+  coachId: string;
   onDone: () => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -31,20 +31,17 @@ export default function UploadButton({
       }
 
       setStatus("uploading");
-      const upload = await uploadDrillVideo(playerId, drillId, uploadFile);
+      const upload = await uploadTeamFilm(teamId, coachId, uploadFile);
 
       setStatus("analyzing");
-      // Starting with a single reference profile (Curry) to validate quality before
-      // expanding to player-chosen profiles across the library.
-      const referenceProfile = await getReferenceProfileByName("Stephen Curry");
-      await analysisClient.analyzeUpload(upload.id, upload.video_url, referenceProfile.id);
+      await analyzeTeamFilm(upload.id, upload.video_url);
 
       onDone();
     } catch (err) {
       if (err instanceof CompressionInsufficientError) {
         setError(err.message);
       } else {
-        setError(err instanceof Error ? err.message : "Something went wrong uploading your video. Please try again.");
+        setError(err instanceof Error ? err.message : "Something went wrong uploading your team film. Please try again.");
       }
     } finally {
       setStatus("idle");
@@ -59,8 +56,8 @@ export default function UploadButton({
         Large clips are compressed automatically before upload (limit after compression: {MAX_UPLOAD_MB} MB).
       </p>
       {status === "processing" && <p>Processing video... {Math.round(compressionProgress * 100)}%</p>}
-      {status === "uploading" && <p>Uploading video...</p>}
-      {status === "analyzing" && <p>Analyzing your form against Stephen Curry...</p>}
+      {status === "uploading" && <p>Uploading team film...</p>}
+      {status === "analyzing" && <p>Analyzing team footage...</p>}
       {error && <p style={{ color: "#f87171" }}>{error}</p>}
     </div>
   );

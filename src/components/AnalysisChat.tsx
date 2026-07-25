@@ -60,7 +60,7 @@ export default function AnalysisChat({
         setCorrectionNote("The stored analysis was updated based on your correction.");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to send message.");
+      setError(err instanceof Error ? err.message : "Something went wrong sending your message. Please try again.");
     } finally {
       setSending(false);
     }

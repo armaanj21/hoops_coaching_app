@@ -1,11 +1,15 @@
 // Supabase Storage object keys reject spaces and many special characters — macOS filenames like
 // "Screen Recording 2026-07-23 at 2.15.13 PM.mov" fail outright. Generate a clean key instead of
 // embedding the original filename; nothing in the app currently needs to display the original name.
-export function buildStorageObjectPath(playerId: string, file: File): string {
+// The leading segment must be the uploader's own auth uid — the "uploads" bucket's INSERT policy
+// requires storage.foldername(name)[1] = auth.uid(), regardless of whose content it logically is
+// (a player's own video, or a coach's team film).
+export function buildStorageObjectPath(ownerId: string, file: File, subfolder?: string): string {
   const dotIndex = file.name.lastIndexOf(".");
   const ext = dotIndex !== -1 ? file.name.slice(dotIndex + 1).replace(/[^a-zA-Z0-9]/g, "").toLowerCase() : "";
   const safeExt = ext || "mp4";
-  return `${playerId}/${crypto.randomUUID()}.${safeExt}`;
+  const prefix = subfolder ? `${ownerId}/${subfolder}` : ownerId;
+  return `${prefix}/${crypto.randomUUID()}.${safeExt}`;
 }
 
 export const MAX_UPLOAD_MB = Number(import.meta.env.VITE_MAX_UPLOAD_MB) || 50;

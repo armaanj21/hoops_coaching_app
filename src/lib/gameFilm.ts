@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient";
+import { friendlyError } from "./errorMessages";
 import type { GameFilmAnalysisResult, ReferenceProfile, Upload } from "../types";
 import type { NormalizedBox } from "./analysis/frameExtraction";
 import { buildStorageObjectPath } from "./storagePath";
@@ -14,13 +15,13 @@ export async function getReferenceProfiles(): Promise<ReferenceProfile[]> {
     .select("id, name, position, signature_moves, key_stats, summary")
     .order("position")
     .order("name");
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(friendlyError(error, "Couldn't load reference profiles. Please try again."));
   return (data ?? []) as ReferenceProfile[];
 }
 
 export async function setMyReferenceProfile(playerId: string, referenceProfileId: string): Promise<void> {
   const { error } = await supabase.from("users").update({ reference_profile_id: referenceProfileId }).eq("id", playerId);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(friendlyError(error, "Couldn't save your selection. Please try again."));
 }
 
 export async function uploadGameFilm(
@@ -31,7 +32,7 @@ export async function uploadGameFilm(
 ): Promise<Upload> {
   const path = buildStorageObjectPath(playerId, file);
   const { error: uploadError } = await supabase.storage.from("uploads").upload(path, file);
-  if (uploadError) throw new Error(uploadError.message);
+  if (uploadError) throw new Error(friendlyError(uploadError, "Couldn't upload your video. Please try again."));
 
   const { data: publicUrlData } = supabase.storage.from("uploads").getPublicUrl(path);
 
@@ -47,7 +48,7 @@ export async function uploadGameFilm(
     })
     .select("id, player_id, drill_id, video_url, created_at, upload_type, jersey_number, jersey_color")
     .single();
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(friendlyError(error, "Couldn't save your upload. Please try again."));
   return data as Upload;
 }
 
@@ -66,7 +67,7 @@ export async function saveMarker(
       marker_height: box.height,
     })
     .eq("id", uploadId);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(friendlyError(error, "Couldn't save your marker. Please try again."));
 }
 
 export async function getGameFilmUploads(): Promise<GameFilmUploadWithAnalysis[]> {
@@ -77,6 +78,6 @@ export async function getGameFilmUploads(): Promise<GameFilmUploadWithAnalysis[]
     )
     .eq("upload_type", "game_film")
     .order("created_at", { ascending: false });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(friendlyError(error, "Couldn't load game film. Please try again."));
   return (data ?? []) as unknown as GameFilmUploadWithAnalysis[];
 }

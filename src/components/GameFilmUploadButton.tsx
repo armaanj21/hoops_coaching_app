@@ -62,7 +62,7 @@ export default function GameFilmUploadButton({
       if (err instanceof CompressionInsufficientError) {
         setError(err.message);
       } else {
-        setError(err instanceof Error ? err.message : "Upload failed.");
+        setError(err instanceof Error ? err.message : "Something went wrong uploading your video. Please try again.");
       }
       setStatus("idle");
     } finally {
@@ -90,7 +90,7 @@ export default function GameFilmUploadButton({
       setPendingBox(box);
       setDebugFrame(`data:image/jpeg;base64,${annotated}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to render debug preview.");
+      setError(err instanceof Error ? err.message : "Something went wrong preparing the preview. Please try again.");
       setStatus("marking");
     }
   }
@@ -113,7 +113,7 @@ export default function GameFilmUploadButton({
       resetPending();
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Analysis failed.");
+      setError(err instanceof Error ? err.message : "Something went wrong running the analysis. Please try again.");
       setStatus("confirming");
     }
   }

@@ -1,14 +1,8 @@
-import Anthropic from "@anthropic-ai/sdk";
 import type { AnalysisMessage, GameFilmAnalysisResult, GameFilmFeedback } from "../../types";
 import { supabase } from "../supabaseClient";
+import { friendlyError } from "../errorMessages";
 import { annotateFrameWithBox, extractFrameAt, extractFramesNear } from "./frameExtraction";
-
-// Same dev/isolated-testing caveat as the other analysis clients: client-side only because
-// there's no server infra to hold the API key server-side.
-const anthropic = new Anthropic({
-  apiKey: import.meta.env.VITE_ANTHROPIC_API_KEY,
-  dangerouslyAllowBrowser: true,
-});
+import { callClaudeAnalysis } from "./claudeAnalysisProxy";
 
 const CHAT_RESPONSE_SCHEMA = {
   type: "object" as const,
@@ -37,7 +31,7 @@ export async function getMessages(analysisResultId: string): Promise<AnalysisMes
     .select("id, analysis_result_id, role, content, created_at")
     .eq("analysis_result_id", analysisResultId)
     .order("created_at", { ascending: true });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(friendlyError(error, "Couldn't load this chat. Please try again."));
   return (data ?? []) as AnalysisMessage[];
 }
 
@@ -50,14 +44,14 @@ export async function sendChatMessage(
     .select("id, upload_id, reference_player_or_position, feedback_text, structured_feedback, created_at")
     .eq("id", analysisResultId)
     .single();
-  if (analysisError) throw new Error(analysisError.message);
+  if (analysisError) throw new Error(friendlyError(analysisError, "Couldn't load this analysis. Please try again."));
 
   const { data: upload, error: uploadError } = await supabase
     .from("uploads")
     .select("video_url, marker_frame_time, marker_x, marker_y, marker_width, marker_height, jersey_number, jersey_color")
     .eq("id", analysis.upload_id)
     .single();
-  if (uploadError) throw new Error(uploadError.message);
+  if (uploadError) throw new Error(friendlyError(uploadError, "Couldn't load the original video for this analysis."));
   if (upload.marker_frame_time === null) {
     throw new Error("This upload has no saved marker — can't ground follow-up chat in the original frames.");
   }
@@ -70,7 +64,7 @@ export async function sendChatMessage(
     .select("name, position, signature_moves, key_stats, summary")
     .eq("name", analysis.reference_player_or_position)
     .maybeSingle();
-  if (refError) throw new Error(refError.message);
+  if (refError) throw new Error(friendlyError(refError, "Couldn't load the reference player for this analysis."));
 
   const history = await getMessages(analysisResultId);
 
@@ -96,7 +90,7 @@ ${
 
 You are now in a follow-up chat with the player about this analysis. Answer their questions or address corrections, grounded in the frames above and the original analysis. If they point out a factual mistake (e.g. "that's the wrong player" or a wrong detail about what happened in the footage), acknowledge it directly in your reply. If the correction would meaningfully change the analysis, set correction_applied to true and provide the corrected values in updated_overall_note / updated_areas_to_improve / updated_comparison_player_insight / updated_explanation — these fully replace the stored analysis, so include everything (not just the corrected part) with the correction applied throughout. If there's no meaningful correction, set correction_applied to false and just echo the original overall_note/areas_to_improve/comparison_player_insight/explanation unchanged in those fields.`;
 
-  const messages: Anthropic.MessageParam[] = [
+  const messages = [
     {
       role: "user",
       content: [
@@ -120,32 +114,25 @@ You are now in a follow-up chat with the player about this analysis. Answer thei
   const { error: insertUserError } = await supabase
     .from("analysis_messages")
     .insert({ analysis_result_id: analysisResultId, role: "user", content: message });
-  if (insertUserError) throw new Error(insertUserError.message);
+  if (insertUserError) throw new Error(friendlyError(insertUserError, "Couldn't send your message. Please try again."));
 
-  const response = await anthropic.messages.create({
-    model: "claude-opus-4-8",
-    max_tokens: 2048,
-    output_config: { format: { type: "json_schema", schema: CHAT_RESPONSE_SCHEMA } },
-    messages,
-  });
-
-  const textBlock = response.content.find((b) => b.type === "text");
-  if (!textBlock || textBlock.type !== "text") throw new Error("No text response from chat model");
-  const parsed = JSON.parse(textBlock.text) as {
+  const parsed = await callClaudeAnalysis<{
     reply: string;
     correction_applied: boolean;
     updated_overall_note: string;
     updated_areas_to_improve: string[];
     updated_comparison_player_insight: string;
     updated_explanation: string;
-  };
+  }>("claude-opus-4-8", 2048, CHAT_RESPONSE_SCHEMA, messages);
 
   const { data: insertedAssistantMessage, error: insertAssistantError } = await supabase
     .from("analysis_messages")
     .insert({ analysis_result_id: analysisResultId, role: "assistant", content: parsed.reply })
     .select("id, analysis_result_id, role, content, created_at")
     .single();
-  if (insertAssistantError) throw new Error(insertAssistantError.message);
+  if (insertAssistantError) {
+    throw new Error(friendlyError(insertAssistantError, "Got a reply but couldn't save it. Please try again."));
+  }
 
   let updatedAnalysis: GameFilmAnalysisResult | null = null;
   if (parsed.correction_applied) {
@@ -161,7 +148,9 @@ You are now in a follow-up chat with the player about this analysis. Answer thei
       .eq("id", analysisResultId)
       .select("id, upload_id, reference_player_or_position, feedback_text, structured_feedback, created_at")
       .single();
-    if (updateError) throw new Error(updateError.message);
+    if (updateError) {
+      throw new Error(friendlyError(updateError, "The correction came through, but saving it failed. Please try again."));
+    }
     updatedAnalysis = updated as GameFilmAnalysisResult;
   }
 

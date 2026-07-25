@@ -1,4 +1,5 @@
 import { supabase } from "./supabaseClient";
+import { friendlyError } from "./errorMessages";
 import type { Assignment, Drill, Profile, SkillCategory, Team } from "../types";
 
 export async function getMyTeam(profile: Profile): Promise<Team | null> {
@@ -8,7 +9,7 @@ export async function getMyTeam(profile: Profile): Promise<Team | null> {
     .select("id, coach_id, name, invite_code")
     .eq("id", profile.team_id)
     .maybeSingle();
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(friendlyError(error, "Couldn't load your team. Please try again."));
   return data;
 }
 
@@ -18,7 +19,7 @@ export async function getRoster(teamId: string): Promise<Profile[]> {
     .select("id, role, name, team_id")
     .eq("team_id", teamId)
     .eq("role", "player");
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(friendlyError(error, "Couldn't load your roster. Please try again."));
   return (data ?? []) as Profile[];
 }
 
@@ -27,18 +28,23 @@ export async function getDrills(): Promise<Drill[]> {
     .from("drills")
     .select("id, title, description, skill_category, reference_video_url")
     .order("skill_category");
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(friendlyError(error, "Couldn't load the drill library. Please try again."));
   return (data ?? []) as Drill[];
 }
 
-export async function assignDrill(params: { drillId: string; teamId: string; playerIds: string[] }): Promise<void> {
+export async function assignDrill(params: {
+  drillId: string;
+  teamId: string;
+  playerIds: string[];
+}): Promise<{ id: string }[]> {
   const { drillId, teamId, playerIds } = params;
   const rows: { drill_id: string; team_id: string | null; player_id: string | null }[] =
     playerIds.length > 0
       ? playerIds.map((playerId) => ({ drill_id: drillId, team_id: null, player_id: playerId }))
       : [{ drill_id: drillId, team_id: teamId, player_id: null }];
-  const { error } = await supabase.from("assignments").insert(rows);
-  if (error) throw new Error(error.message);
+  const { data, error } = await supabase.from("assignments").insert(rows).select("id");
+  if (error) throw new Error(friendlyError(error, "Couldn't assign the drill. Please try again."));
+  return data ?? [];
 }
 
 export interface AssignmentWithDrill extends Assignment {
@@ -53,6 +59,6 @@ export async function getMyAssignments(profile: Profile): Promise<AssignmentWith
     .from("assignments")
     .select("id, status, drill_id, team_id, player_id, drills(title, skill_category)")
     .or(orFilter);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(friendlyError(error, "Couldn't load your assignments. Please try again."));
   return (data ?? []) as unknown as AssignmentWithDrill[];
 }

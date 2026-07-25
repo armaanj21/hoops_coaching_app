@@ -2,6 +2,8 @@
 // there's no server-side ffmpeg pipeline in this scaffold — see the note in claudeAnalysisClient.ts
 // about moving this server-side (Supabase Edge Function) before production.
 
+import { withTimeout } from "../withTimeout";
+
 export interface NormalizedBox {
   x: number;
   y: number;
@@ -9,28 +11,73 @@ export interface NormalizedBox {
   height: number;
 }
 
+// iOS Safari specifically can simply never fire `seeked` for a given seek — most commonly when
+// the video hasn't buffered enough around the target time yet, or for certain HEVC streams — with
+// no error event either, which is exactly the "hangs at frame extraction" symptom reported from a
+// real iPhone (never reproduced on desktop/synthetic clips because desktop Chrome/Safari don't
+// share this quirk). Every wait below has a hard timeout so that failure mode surfaces as an error
+// instead of a silently frozen spinner.
+const LOAD_TIMEOUT_MS = 20_000;
+const SEEK_TIMEOUT_MS = 10_000;
+
+export class FrameExtractionTimeoutError extends Error {
+  constructor(stage: "load" | "seek") {
+    super(
+      stage === "load"
+        ? "This video is taking too long to load for analysis. Try a shorter clip, or re-export it in a more compatible format (H.264 MP4) before uploading."
+        : "This video got stuck while reading a frame for analysis — this can happen with certain phone video formats. Try a shorter clip, or re-export it in a more compatible format (H.264 MP4) before uploading."
+    );
+    this.name = "FrameExtractionTimeoutError";
+  }
+}
+
 async function loadVideo(videoUrl: string): Promise<HTMLVideoElement> {
   const video = document.createElement("video");
   video.crossOrigin = "anonymous";
   video.muted = true;
+  video.playsInline = true;
+  video.preload = "auto";
   video.src = videoUrl;
 
-  await new Promise<void>((resolve, reject) => {
-    video.addEventListener("loadedmetadata", () => resolve(), { once: true });
-    video.addEventListener("error", () => reject(new Error("Failed to load video for frame extraction")), {
-      once: true,
-    });
-  });
+  await withTimeout(
+    new Promise<void>((resolve, reject) => {
+      // Waiting on loadedmetadata alone (enough for dimensions/duration) isn't enough on iOS
+      // Safari — seeking before Safari has actually buffered decodable frames around time 0 is a
+      // common trigger for `seeked` never firing later. loadeddata guarantees at least one frame
+      // is decoded and ready, which is the point Safari reliably allows seeking from.
+      video.addEventListener("loadeddata", () => resolve(), { once: true });
+      video.addEventListener("error", () => reject(new Error("Failed to load video for frame extraction")), {
+        once: true,
+      });
+    }),
+    LOAD_TIMEOUT_MS,
+    () => new FrameExtractionTimeoutError("load")
+  );
+
+  // A known iOS Safari workaround: briefly playing (muted, so autoplay is allowed) and pausing
+  // nudges Safari's decoder into a state where subsequent currentTime seeks actually complete.
+  // Best-effort — if autoplay is blocked for any reason, seeking still gets a chance to work on
+  // its own, so a failure here is silently ignored rather than surfaced.
+  try {
+    await video.play();
+    video.pause();
+  } catch {
+    // ignored — see comment above
+  }
 
   return video;
 }
 
 async function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    video.addEventListener("seeked", () => resolve(), { once: true });
-    video.addEventListener("error", () => reject(new Error("Failed to seek video")), { once: true });
-    video.currentTime = time;
-  });
+  await withTimeout(
+    new Promise<void>((resolve, reject) => {
+      video.addEventListener("seeked", () => resolve(), { once: true });
+      video.addEventListener("error", () => reject(new Error("Failed to seek video")), { once: true });
+      video.currentTime = time;
+    }),
+    SEEK_TIMEOUT_MS,
+    () => new FrameExtractionTimeoutError("seek")
+  );
 }
 
 function makeCanvas(video: HTMLVideoElement): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {

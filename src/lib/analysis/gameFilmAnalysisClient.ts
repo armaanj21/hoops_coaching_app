@@ -1,17 +1,12 @@
-import Anthropic from "@anthropic-ai/sdk";
 import type { GameFilmAnalysisResult, GameFilmFeedback } from "../../types";
 import { supabase } from "../supabaseClient";
+import { friendlyError } from "../errorMessages";
 import { annotateFrameWithBox, extractFrameAt, extractFramesNear, type NormalizedBox } from "./frameExtraction";
+import { callClaudeAnalysis } from "./claudeAnalysisProxy";
 
-// Same dev/isolated-testing caveat as claudeAnalysisClient.ts: client-side only because there's
-// no server infra (Edge Function) available here to hold the API key. Move server-side before
-// shipping to real users. Kept as its own module (not the drill-check AnalysisClient) since the
-// input/output shape and prompt are meaningfully different — this is broad game-film analysis,
-// not a single-drill form check.
-const anthropic = new Anthropic({
-  apiKey: import.meta.env.VITE_ANTHROPIC_API_KEY,
-  dangerouslyAllowBrowser: true,
-});
+// Kept as its own module (not the drill-check AnalysisClient) since the input/output shape and
+// prompt are meaningfully different — this is broad game-film analysis, not a single-drill form
+// check.
 
 const GAME_FILM_FEEDBACK_SCHEMA = {
   type: "object" as const,
@@ -39,7 +34,7 @@ export async function analyzeGameFilm(
     .select("name, position, signature_moves, key_stats, summary")
     .eq("id", referenceProfileId)
     .single();
-  if (refError) throw new Error(refError.message);
+  if (refError) throw new Error(friendlyError(refError, "Couldn't load your reference player."));
 
   // The annotated reference frame MUST be the exact frame the player marked — not an approximation
   // from the nearby-frames window (extractFramesNear's first sample can be up to `spreadSeconds`
@@ -54,11 +49,11 @@ export async function analyzeGameFilm(
   // above is the sole source of truth for who to track.
   const { frames: nearbyFrames } = await extractFramesNear(videoUrl, markerFrameTime, 6, 2);
 
-  const response = await anthropic.messages.create({
-    model: "claude-opus-4-8",
-    max_tokens: 2048,
-    output_config: { format: { type: "json_schema", schema: GAME_FILM_FEEDBACK_SCHEMA } },
-    messages: [
+  const structured_feedback = await callClaudeAnalysis<GameFilmFeedback>(
+    "claude-opus-4-8",
+    2048,
+    GAME_FILM_FEEDBACK_SCHEMA,
+    [
       {
         role: "user",
         content: [
@@ -93,12 +88,8 @@ Analyze whatever is visible across these frames for the marked player specifical
           },
         ],
       },
-    ],
-  });
-
-  const textBlock = response.content.find((b) => b.type === "text");
-  if (!textBlock || textBlock.type !== "text") throw new Error("No text response from analysis model");
-  const structured_feedback = JSON.parse(textBlock.text) as GameFilmFeedback;
+    ]
+  );
 
   const { data: inserted, error: insertError } = await supabase
     .from("analysis_results")
@@ -110,7 +101,7 @@ Analyze whatever is visible across these frames for the marked player specifical
     })
     .select("id, upload_id, reference_player_or_position, feedback_text, structured_feedback, created_at")
     .single();
-  if (insertError) throw new Error(insertError.message);
+  if (insertError) throw new Error(friendlyError(insertError, "Analysis finished, but saving it failed. Please try again."));
 
   return inserted as GameFilmAnalysisResult;
 }

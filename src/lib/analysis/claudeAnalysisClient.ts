@@ -1,17 +1,9 @@
-import Anthropic from "@anthropic-ai/sdk";
 import type { AnalysisClient } from "./analysisClient";
 import type { AnalysisResult, StructuredFeedback } from "../../types";
 import { supabase } from "../supabaseClient";
+import { friendlyError } from "../errorMessages";
 import { extractFrames } from "./frameExtraction";
-
-// Client-side for now, per the project brief's "build and test in isolation" phase — there's no
-// server infra (Edge Function / backend) available in this environment to hold the API key
-// server-side. VITE_ANTHROPIC_API_KEY is dev/isolated-testing only (see .env.example); move this
-// call behind a server-side function before shipping to real users.
-const anthropic = new Anthropic({
-  apiKey: import.meta.env.VITE_ANTHROPIC_API_KEY,
-  dangerouslyAllowBrowser: true,
-});
+import { callClaudeAnalysis } from "./claudeAnalysisProxy";
 
 const FEEDBACK_SCHEMA = {
   type: "object" as const,
@@ -32,29 +24,29 @@ export class ClaudeAnalysisClient implements AnalysisClient {
       .select("drill_id")
       .eq("id", uploadId)
       .single();
-    if (uploadError) throw new Error(uploadError.message);
+    if (uploadError) throw new Error(friendlyError(uploadError, "Couldn't find that upload. Please try again."));
 
     const { data: drill, error: drillError } = await supabase
       .from("drills")
       .select("title, description, skill_category")
       .eq("id", upload.drill_id)
       .single();
-    if (drillError) throw new Error(drillError.message);
+    if (drillError) throw new Error(friendlyError(drillError, "Couldn't load the drill for this upload."));
 
     const { data: referenceProfile, error: refError } = await supabase
       .from("reference_profiles")
       .select("name, position, signature_moves, key_stats, summary")
       .eq("id", referenceProfileId)
       .single();
-    if (refError) throw new Error(refError.message);
+    if (refError) throw new Error(friendlyError(refError, "Couldn't load your reference player."));
 
     const frames = await extractFrames(videoUrl, 3);
 
-    const response = await anthropic.messages.create({
-      model: "claude-opus-4-8",
-      max_tokens: 2048,
-      output_config: { format: { type: "json_schema", schema: FEEDBACK_SCHEMA } },
-      messages: [
+    const structured_feedback = await callClaudeAnalysis<StructuredFeedback>(
+      "claude-opus-4-8",
+      2048,
+      FEEDBACK_SCHEMA,
+      [
         {
           role: "user",
           content: [
@@ -79,12 +71,8 @@ Analyze the player's form in these frames compared to the reference. Return stru
             },
           ],
         },
-      ],
-    });
-
-    const textBlock = response.content.find((b) => b.type === "text");
-    if (!textBlock || textBlock.type !== "text") throw new Error("No text response from analysis model");
-    const structured_feedback = JSON.parse(textBlock.text) as StructuredFeedback;
+      ]
+    );
 
     const { data: inserted, error: insertError } = await supabase
       .from("analysis_results")
@@ -96,7 +84,7 @@ Analyze the player's form in these frames compared to the reference. Return stru
       })
       .select("id, upload_id, reference_player_or_position, feedback_text, structured_feedback, created_at")
       .single();
-    if (insertError) throw new Error(insertError.message);
+    if (insertError) throw new Error(friendlyError(insertError, "Analysis finished, but saving it failed. Please try again."));
 
     return inserted as AnalysisResult;
   }
