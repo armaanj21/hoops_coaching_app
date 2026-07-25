@@ -11,8 +11,10 @@ import PlayerHome from "./pages/PlayerHome";
 import DrillLibrary from "./pages/DrillLibrary";
 import DrillDetail from "./pages/DrillDetail";
 import PlayerProgress from "./pages/PlayerProgress";
+import CoachPlayerProgress from "./pages/CoachPlayerProgress";
 import ReferenceProfiles from "./pages/ReferenceProfiles";
 import GameFilm from "./pages/GameFilm";
+import TeamFilm from "./pages/TeamFilm";
 
 export default function App() {
   const [profile, setProfile] = useState<Profile | null>(getSession());
@@ -60,6 +62,10 @@ export default function App() {
             element={profile?.role === "player" ? <PlayerProgress profile={profile} /> : <Navigate to="/login" />}
           />
           <Route
+            path="/progress/:playerId"
+            element={profile?.role === "coach" ? <CoachPlayerProgress /> : <Navigate to="/login" />}
+          />
+          <Route
             path="/reference-profiles"
             element={
               profile ? (
@@ -70,6 +76,10 @@ export default function App() {
             }
           />
           <Route path="/game-film" element={profile ? <GameFilm profile={profile} /> : <Navigate to="/login" />} />
+          <Route
+            path="/team-film"
+            element={profile?.role === "coach" ? <TeamFilm profile={profile} /> : <Navigate to="/login" />}
+          />
           <Route path="/" element={<Navigate to={profile ? home : "/login"} />} />
         </Routes>
       </main>

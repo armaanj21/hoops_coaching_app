@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import type { Drill, Profile } from "../types";
 import { supabase } from "../lib/supabaseClient";
+import { friendlyError } from "../lib/errorMessages";
 import { getUploadsForDrill, type UploadWithAnalysis } from "../lib/uploads";
 import UploadButton from "../components/UploadButton";
 import AnalysisFeedbackCard from "../components/AnalysisFeedbackCard";
@@ -27,7 +28,7 @@ export default function DrillDetail({ profile }: { profile: Profile }) {
         .select("id, title, description, skill_category, reference_video_url")
         .eq("id", id)
         .single();
-      if (drillError) throw new Error(drillError.message);
+      if (drillError) throw new Error(friendlyError(drillError, "Couldn't load this drill. Please try again."));
       setDrill(drillData);
       setUploads(await getUploadsForDrill(id));
     } catch (err) {

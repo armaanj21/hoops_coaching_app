@@ -1,14 +1,27 @@
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile, toBlobURL } from "@ffmpeg/util";
 import { MAX_UPLOAD_MB } from "./storagePath";
+import { withTimeout } from "./withTimeout";
+
+// Phone camera clips (H.264/HEVC, already hardware-encoded at reasonable bitrates) are typically
+// far more efficiently compressed going in than a desktop screen recording is — re-encoding them
+// through ffmpeg.wasm's single-threaded software x264 path is both less necessary and much slower
+// on a phone's weaker CPU (no WASM SIMD/threads in the single-thread core this app uses). Skip
+// compression on more mobile clips by raising the threshold, and if compression does still run,
+// target a smaller frame so the encode itself finishes faster.
+const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
 // Only worth compressing when a file is close to or over the limit — small files skip this
 // entirely and upload as-is.
-const COMPRESSION_THRESHOLD_MB = MAX_UPLOAD_MB * 0.8;
+const COMPRESSION_THRESHOLD_MB = MAX_UPLOAD_MB * (isMobile ? 1.3 : 0.8);
 
 // Leave headroom below the hard limit for container/muxing overhead so the compressed file
 // reliably lands under it, not just barely over.
 const TARGET_MB = MAX_UPLOAD_MB * 0.9;
+
+// Mobile encodes at a lower cap resolution (480p vs 720p) — fewer pixels to push through the
+// software encoder means a meaningfully shorter encode on phone-class CPUs.
+const SCALE_FILTER = isMobile ? "scale='min(854,iw)':-2" : "scale='min(1280,iw)':-2";
 
 const AUDIO_BITRATE_KBPS = 64;
 const MIN_VIDEO_BITRATE_KBPS = 300;
@@ -23,8 +36,13 @@ const MAX_VIDEO_BITRATE_KBPS = 4000;
 // reach the encoder — if decode is the bottleneck (e.g. software HEVC decode, common for iPhone
 // .mov clips, is brutally slow in a single-threaded WASM environment), progress can sit at 0% for
 // a very long time while genuinely still working, indistinguishable from actually hung. Rather
-// than leave the user staring at a frozen bar forever, fail loudly after this long instead.
-const ENCODE_TIMEOUT_MS = 60_000;
+// than leave the user staring at a frozen bar forever, fail loudly after this long instead. Mobile
+// CPUs are meaningfully slower at this than desktop, so they get a longer budget before giving up.
+const ENCODE_TIMEOUT_MS = isMobile ? 120_000 : 60_000;
+
+// Wall-clock loading budget — a stalled fetch of the (~30MB) wasm core would otherwise leave the
+// "Processing video..." spinner up forever with no way out.
+const LOAD_TIMEOUT_MS = 30_000;
 
 let ffmpegInstance: FFmpeg | null = null;
 let ffmpegLoadPromise: Promise<FFmpeg> | null = null;
@@ -32,26 +50,36 @@ let ffmpegLoadPromise: Promise<FFmpeg> | null = null;
 async function getFFmpeg(): Promise<FFmpeg> {
   if (ffmpegInstance) return ffmpegInstance;
   if (!ffmpegLoadPromise) {
-    ffmpegLoadPromise = (async () => {
-      const ffmpeg = new FFmpeg();
-      // Surface ffmpeg's own stderr (codec/format detection, decode/encode diagnostics) to the
-      // console — the main lead for diagnosing which codec a stuck clip actually uses.
-      ffmpeg.on("log", ({ message }) => {
-        console.log("[video-compression ffmpeg]", message);
-      });
-      // Must be the ESM build of ffmpeg-core, not UMD: @ffmpeg/ffmpeg's internal worker is bundled
-      // by Vite as a module worker, where `importScripts` isn't available, so it falls back to a
-      // dynamic `import()` of the core file — a UMD script has no default export for that to
-      // resolve, which throws "failed to import ffmpeg-core.js". Copied into /public/ffmpeg (see
-      // package.json's @ffmpeg/core dependency) and served same-origin, matching that ESM path.
-      const baseURL = "/ffmpeg";
-      await ffmpeg.load({
-        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
-        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
-      });
-      ffmpegInstance = ffmpeg;
-      return ffmpeg;
-    })();
+    ffmpegLoadPromise = withTimeout(
+      (async () => {
+        const ffmpeg = new FFmpeg();
+        // Surface ffmpeg's own stderr (codec/format detection, decode/encode diagnostics) to the
+        // console — the main lead for diagnosing which codec a stuck clip actually uses.
+        ffmpeg.on("log", ({ message }) => {
+          console.log("[video-compression ffmpeg]", message);
+        });
+        // Must be the ESM build of ffmpeg-core, not UMD: @ffmpeg/ffmpeg's internal worker is
+        // bundled by Vite as a module worker, where `importScripts` isn't available, so it falls
+        // back to a dynamic `import()` of the core file — a UMD script has no default export for
+        // that to resolve, which throws "failed to import ffmpeg-core.js". Copied into
+        // /public/ffmpeg (see package.json's @ffmpeg/core dependency) and served same-origin,
+        // matching that ESM path.
+        const baseURL = "/ffmpeg";
+        await ffmpeg.load({
+          coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
+          wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
+        });
+        ffmpegInstance = ffmpeg;
+        return ffmpeg;
+      })(),
+      LOAD_TIMEOUT_MS,
+      () => new CompressionTimeoutError()
+    ).catch((err) => {
+      // A failed/timed-out load must not poison future attempts — clear the cached promise so the
+      // next upload gets a fresh try instead of instantly failing forever.
+      ffmpegLoadPromise = null;
+      throw err;
+    });
   }
   return ffmpegLoadPromise;
 }
@@ -119,31 +147,37 @@ async function encode(
   await ffmpeg.writeFile(inputName, await fetchFile(file));
   const outputName = "output.mp4";
   const startedAt = Date.now();
-  const returnCode = await ffmpeg.exec(
-    [
-      "-i",
-      inputName,
-      "-vf",
-      "scale='min(1280,iw)':-2",
-      "-c:v",
-      "libx264",
-      "-preset",
-      "veryfast",
-      "-b:v",
-      `${videoBitrateKbps}k`,
-      "-maxrate",
-      `${Math.round(videoBitrateKbps * 1.5)}k`,
-      "-bufsize",
-      `${videoBitrateKbps * 2}k`,
-      "-c:a",
-      "aac",
-      "-b:a",
-      `${AUDIO_BITRATE_KBPS}k`,
-      "-movflags",
-      "+faststart",
-      outputName,
-    ],
-    ENCODE_TIMEOUT_MS
+  // Backstopped by withTimeout independently of ffmpeg's own `timeout` param — see its comment on
+  // getFFmpeg for why the internal mechanism alone isn't trustworthy under a truly wedged worker.
+  const returnCode = await withTimeout(
+    ffmpeg.exec(
+      [
+        "-i",
+        inputName,
+        "-vf",
+        SCALE_FILTER,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-b:v",
+        `${videoBitrateKbps}k`,
+        "-maxrate",
+        `${Math.round(videoBitrateKbps * 1.5)}k`,
+        "-bufsize",
+        `${videoBitrateKbps * 2}k`,
+        "-c:a",
+        "aac",
+        "-b:a",
+        `${AUDIO_BITRATE_KBPS}k`,
+        "-movflags",
+        "+faststart",
+        outputName,
+      ],
+      ENCODE_TIMEOUT_MS
+    ),
+    ENCODE_TIMEOUT_MS + 5_000,
+    () => new CompressionTimeoutError()
   );
   if (returnCode !== 0) {
     // A nonzero code covers both an actual timeout and a fast ffmpeg failure (e.g. unsupported
@@ -200,6 +234,19 @@ export async function compressVideo(file: File, onProgress: (ratio: number) => v
     const blob = new Blob([data.buffer as BlobPart], { type: "video/mp4" });
     const baseName = file.name.replace(/\.[^/.]+$/, "");
     return new File([blob], `${baseName}-compressed.mp4`, { type: "video/mp4" });
+  } catch (err) {
+    if (err instanceof CompressionTimeoutError) {
+      // The worker may still be wedged after our outer race gave up on it — kill it and drop the
+      // cached instance so the next upload attempt gets a fresh worker instead of hanging again.
+      try {
+        ffmpeg.terminate();
+      } catch {
+        // best-effort; the worker may already be dead
+      }
+      ffmpegInstance = null;
+      ffmpegLoadPromise = null;
+    }
+    throw err;
   } finally {
     ffmpeg.off("progress", progressHandler);
   }

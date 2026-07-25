@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import type { Profile } from "../types";
 import { getMyAssignments, type AssignmentWithDrill } from "../lib/teams";
+import { getMyCompletedAssignmentIds } from "../lib/drillFeedback";
 import AssignmentList from "../components/AssignmentList";
 
 export default function PlayerHome({ profile }: { profile: Profile }) {
   const [assignments, setAssignments] = useState<AssignmentWithDrill[]>([]);
+  const [completedAssignmentIds, setCompletedAssignmentIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -17,7 +19,12 @@ export default function PlayerHome({ profile }: { profile: Profile }) {
     setLoading(true);
     setError(null);
     try {
-      setAssignments(await getMyAssignments(profile));
+      const [assignmentsData, completedIds] = await Promise.all([
+        getMyAssignments(profile),
+        getMyCompletedAssignmentIds(profile.id),
+      ]);
+      setAssignments(assignmentsData);
+      setCompletedAssignmentIds(completedIds);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load assignments.");
     } finally {
@@ -31,7 +38,14 @@ export default function PlayerHome({ profile }: { profile: Profile }) {
       <div className="card">
         {loading && <p>Loading...</p>}
         {error && <p style={{ color: "#f87171" }}>{error}</p>}
-        {!loading && !error && <AssignmentList assignments={assignments} />}
+        {!loading && !error && (
+          <AssignmentList
+            assignments={assignments}
+            completedAssignmentIds={completedAssignmentIds}
+            playerId={profile.id}
+            onCompleted={() => void loadAssignments()}
+          />
+        )}
       </div>
     </div>
   );

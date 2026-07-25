@@ -35,6 +35,27 @@ export interface Assignment {
   status: AssignmentStatus;
 }
 
+export type DrillDifficulty = "too_easy" | "just_right" | "too_hard";
+
+export interface DrillFeedback {
+  id: string;
+  assignment_id: string;
+  drill_id: string;
+  player_id: string;
+  difficulty: DrillDifficulty;
+  note: string | null;
+  created_at: string;
+}
+
+export interface DrillFeedbackSummary {
+  drillId: string;
+  drillTitle: string;
+  tooEasy: number;
+  justRight: number;
+  tooHard: number;
+  recentNotes: { playerName: string; note: string }[];
+}
+
 export type UploadType = "drill" | "game_film";
 
 export interface Upload {
@@ -112,4 +133,66 @@ export interface ReferenceProfile {
   signature_moves: string[];
   key_stats: Record<string, string | number>;
   summary: string;
+}
+
+export interface TeamFilmUpload {
+  id: string;
+  team_id: string;
+  coach_id: string;
+  video_url: string;
+  created_at: string;
+}
+
+export interface PlayerUtilizationNote {
+  player_descriptor: string;
+  note: string;
+}
+
+export interface TeamFilmAnalysisResult {
+  id: string;
+  upload_id: string;
+  team_strategy_notes: string;
+  player_utilization_notes: PlayerUtilizationNote[];
+  created_at: string;
+}
+
+export type AnalysisKind = "drill" | "game_film";
+
+// Unifies AnalysisResult (drill-check) and GameFilmAnalysisResult into one shape for the progress
+// timeline — the two have different structured_feedback fields, so this pulls out just what a
+// chronological/pattern view needs, regardless of which kind produced it.
+export interface AnalysisHistoryEntry {
+  id: string;
+  uploadId: string;
+  kind: AnalysisKind;
+  createdAt: string;
+  referenceName: string;
+  overallNote: string;
+  issues: string[];
+  drillTitle: string | null;
+}
+
+export interface ProgressPattern {
+  theme: string;
+  summary: string;
+  analysisIds: string[];
+}
+
+export interface IssueDrillLink {
+  id: string;
+  analysisResultId: string;
+  assignmentId: string;
+  issueDescription: string;
+  createdAt: string;
+  drillTitle: string;
+}
+
+// Client-computed once history + links are loaded: which analysis (if any) is the next
+// chronological one after this link, and whether Claude judged the issue to have reappeared in
+// it. `reappeared`/`narration` stay null until there's a next analysis to actually judge against.
+export interface IssueOutcome {
+  link: IssueDrillLink;
+  nextAnalysisId: string | null;
+  reappeared: boolean | null;
+  narration: string | null;
 }
