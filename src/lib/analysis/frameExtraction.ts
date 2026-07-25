@@ -20,12 +20,39 @@ export interface NormalizedBox {
 const LOAD_TIMEOUT_MS = 20_000;
 const SEEK_TIMEOUT_MS = 10_000;
 
+// MediaError.code is a small numeric enum with no message text of its own — translate it so the
+// diagnostic string means something without needing the spec open.
+const MEDIA_ERROR_NAMES: Record<number, string> = {
+  1: "MEDIA_ERR_ABORTED",
+  2: "MEDIA_ERR_NETWORK",
+  3: "MEDIA_ERR_DECODE",
+  4: "MEDIA_ERR_SRC_NOT_SUPPORTED",
+};
+
+// Two prior fixes (removing the network fetch, then forcing faststart) didn't resolve this on the
+// reporter's actual device — rather than guess a third cause blind, surface the video element's
+// real state in the error message itself, so the next failure is diagnosable from what's already
+// on screen instead of needing a cable-connected Mac + Safari Web Inspector.
+function videoDiagnostics(video: HTMLVideoElement): string {
+  const parts = [`readyState=${video.readyState}`, `networkState=${video.networkState}`];
+  if (video.error) {
+    parts.push(`error=${MEDIA_ERROR_NAMES[video.error.code] ?? video.error.code}`);
+    if (video.error.message) parts.push(`errorMessage=${video.error.message}`);
+  } else {
+    parts.push("error=none");
+  }
+  if (!Number.isNaN(video.duration)) parts.push(`duration=${video.duration}`);
+  parts.push(`videoWidth=${video.videoWidth}`, `videoHeight=${video.videoHeight}`);
+  return parts.join(" ");
+}
+
 export class FrameExtractionTimeoutError extends Error {
-  constructor(stage: "load" | "seek") {
+  constructor(stage: "load" | "seek", diagnostics: string) {
     super(
-      stage === "load"
+      (stage === "load"
         ? "This video is taking too long to load for analysis. Try a shorter clip, or re-export it in a more compatible format (H.264 MP4) before uploading."
-        : "This video got stuck while reading a frame for analysis — this can happen with certain phone video formats. Try a shorter clip, or re-export it in a more compatible format (H.264 MP4) before uploading."
+        : "This video got stuck while reading a frame for analysis — this can happen with certain phone video formats. Try a shorter clip, or re-export it in a more compatible format (H.264 MP4) before uploading.") +
+        ` [diagnostics: ${diagnostics}]`
     );
     this.name = "FrameExtractionTimeoutError";
   }
@@ -38,6 +65,7 @@ async function loadVideo(videoUrl: string): Promise<HTMLVideoElement> {
   video.playsInline = true;
   video.preload = "auto";
   video.src = videoUrl;
+  console.log("[frame-extraction] loading video", { videoUrl: videoUrl.slice(0, 60) });
 
   await withTimeout(
     new Promise<void>((resolve, reject) => {
@@ -46,12 +74,21 @@ async function loadVideo(videoUrl: string): Promise<HTMLVideoElement> {
       // common trigger for `seeked` never firing later. loadeddata guarantees at least one frame
       // is decoded and ready, which is the point Safari reliably allows seeking from.
       video.addEventListener("loadeddata", () => resolve(), { once: true });
-      video.addEventListener("error", () => reject(new Error("Failed to load video for frame extraction")), {
-        once: true,
-      });
+      video.addEventListener(
+        "error",
+        () => reject(new Error(`Failed to load video for frame extraction [diagnostics: ${videoDiagnostics(video)}]`)),
+        { once: true }
+      );
+      // Extra visibility into exactly how far the load gets before it (potentially) times out —
+      // these fire even when loadeddata never does.
+      for (const evt of ["loadstart", "durationchange", "loadedmetadata", "canplay", "stalled", "suspend"]) {
+        video.addEventListener(evt, () => console.log(`[frame-extraction] video event: ${evt}`, videoDiagnostics(video)), {
+          once: true,
+        });
+      }
     }),
     LOAD_TIMEOUT_MS,
-    () => new FrameExtractionTimeoutError("load")
+    () => new FrameExtractionTimeoutError("load", videoDiagnostics(video))
   );
 
   // A known iOS Safari workaround: briefly playing (muted, so autoplay is allowed) and pausing
@@ -72,11 +109,15 @@ async function seekTo(video: HTMLVideoElement, time: number): Promise<void> {
   await withTimeout(
     new Promise<void>((resolve, reject) => {
       video.addEventListener("seeked", () => resolve(), { once: true });
-      video.addEventListener("error", () => reject(new Error("Failed to seek video")), { once: true });
+      video.addEventListener(
+        "error",
+        () => reject(new Error(`Failed to seek video [diagnostics: ${videoDiagnostics(video)}]`)),
+        { once: true }
+      );
       video.currentTime = time;
     }),
     SEEK_TIMEOUT_MS,
-    () => new FrameExtractionTimeoutError("seek")
+    () => new FrameExtractionTimeoutError("seek", videoDiagnostics(video))
   );
 }
 

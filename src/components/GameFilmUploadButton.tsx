@@ -47,12 +47,18 @@ export default function GameFilmUploadButton({
       return;
     }
     setError(null);
+    // Surfaced in the error message on failure below — the last two attempts at fixing this
+    // blind (removing the network fetch, then forcing faststart) both failed to reproduce-fix on
+    // the reporter's actual device, so this trades guessing for an actual on-screen diagnostic.
+    let remuxOutcome = "not attempted (compression ran instead)";
     try {
       let uploadFile = file;
+      console.log("[game-film upload] original file", { name: file.name, size: file.size, type: file.type });
       if (needsCompression(file)) {
         setStatus("processing");
         setCompressionProgress(0);
         uploadFile = await compressVideo(file, setCompressionProgress);
+        remuxOutcome = "compressed (includes faststart)";
       } else {
         // compressVideo's own encode always sets +faststart; when compression is skipped, do a
         // cheap remux-only pass instead so frame extraction can still seek reliably. Best-effort —
@@ -60,10 +66,18 @@ export default function GameFilmUploadButton({
         // whole upload on it.
         try {
           uploadFile = await ensureFastStart(file);
-        } catch {
+          remuxOutcome = "faststart remux succeeded";
+        } catch (remuxErr) {
           uploadFile = file;
+          remuxOutcome = `faststart remux FAILED, used original file: ${remuxErr instanceof Error ? remuxErr.message : String(remuxErr)}`;
         }
       }
+      console.log("[game-film upload] remux outcome", remuxOutcome);
+      console.log("[game-film upload] final upload file", {
+        name: uploadFile.name,
+        size: uploadFile.size,
+        type: uploadFile.type,
+      });
 
       const localUrl = URL.createObjectURL(uploadFile);
       setPendingLocalUrl(localUrl);
@@ -81,7 +95,9 @@ export default function GameFilmUploadButton({
       if (err instanceof CompressionInsufficientError) {
         setError(err.message);
       } else {
-        setError(err instanceof Error ? err.message : "Something went wrong uploading your video. Please try again.");
+        const baseMessage =
+          err instanceof Error ? err.message : "Something went wrong uploading your video. Please try again.";
+        setError(`${baseMessage} [file: ${file.name}, ${file.size} bytes, ${file.type || "unknown type"}; remux: ${remuxOutcome}]`);
       }
       setStatus("idle");
     } finally {
