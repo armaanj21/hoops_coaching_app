@@ -67,40 +67,58 @@ async function loadVideo(videoUrl: string): Promise<HTMLVideoElement> {
   video.src = videoUrl;
   console.log("[frame-extraction] loading video", { videoUrl: videoUrl.slice(0, 60) });
 
+  const logEvent = (evt: string) => console.log(`[frame-extraction] video event: ${evt}`, videoDiagnostics(video));
+  for (const evt of ["loadstart", "durationchange", "loadedmetadata", "loadeddata", "canplay", "stalled", "suspend"]) {
+    video.addEventListener(evt, () => logEvent(evt));
+  }
+
+  // Confirmed via a real device diagnostic: Safari can sit at readyState=1 (metadata only,
+  // networkState idle — not even trying to fetch more) indefinitely for a video it isn't actively
+  // playing. It needs an explicit play() to start actually buffering/decoding frame data at all.
+  // This has to happen right after metadata (not after loadeddata, which is exactly the event
+  // stuck waiting on the nudge in the first place — a bug in the previous version of this file,
+  // where the nudge ran after the wait it was meant to unstick).
   await withTimeout(
     new Promise<void>((resolve, reject) => {
-      // Waiting on loadedmetadata alone (enough for dimensions/duration) isn't enough on iOS
-      // Safari — seeking before Safari has actually buffered decodable frames around time 0 is a
-      // common trigger for `seeked` never firing later. loadeddata guarantees at least one frame
-      // is decoded and ready, which is the point Safari reliably allows seeking from.
+      video.addEventListener("loadedmetadata", () => resolve(), { once: true });
+      video.addEventListener(
+        "error",
+        () => reject(new Error(`Failed to load video metadata [diagnostics: ${videoDiagnostics(video)}]`)),
+        { once: true }
+      );
+    }),
+    LOAD_TIMEOUT_MS,
+    () => new FrameExtractionTimeoutError("load", videoDiagnostics(video))
+  );
+
+  // Muted autoplay, so this doesn't need a user gesture — best-effort, but log failures instead of
+  // silently swallowing them now, since this nudge turned out to be load-bearing rather than
+  // cosmetic and a silent failure here was exactly what made the last round undiagnosable.
+  try {
+    await video.play();
+    video.pause();
+  } catch (err) {
+    console.log("[frame-extraction] play/pause nudge failed", err, videoDiagnostics(video));
+  }
+
+  await withTimeout(
+    new Promise<void>((resolve, reject) => {
+      if (video.readyState >= 2) {
+        // HAVE_CURRENT_DATA or better — already past this point, e.g. the play/pause nudge
+        // itself pushed it there and the event already fired before this listener was attached.
+        resolve();
+        return;
+      }
       video.addEventListener("loadeddata", () => resolve(), { once: true });
       video.addEventListener(
         "error",
         () => reject(new Error(`Failed to load video for frame extraction [diagnostics: ${videoDiagnostics(video)}]`)),
         { once: true }
       );
-      // Extra visibility into exactly how far the load gets before it (potentially) times out —
-      // these fire even when loadeddata never does.
-      for (const evt of ["loadstart", "durationchange", "loadedmetadata", "canplay", "stalled", "suspend"]) {
-        video.addEventListener(evt, () => console.log(`[frame-extraction] video event: ${evt}`, videoDiagnostics(video)), {
-          once: true,
-        });
-      }
     }),
     LOAD_TIMEOUT_MS,
     () => new FrameExtractionTimeoutError("load", videoDiagnostics(video))
   );
-
-  // A known iOS Safari workaround: briefly playing (muted, so autoplay is allowed) and pausing
-  // nudges Safari's decoder into a state where subsequent currentTime seeks actually complete.
-  // Best-effort — if autoplay is blocked for any reason, seeking still gets a chance to work on
-  // its own, so a failure here is silently ignored rather than surfaced.
-  try {
-    await video.play();
-    video.pause();
-  } catch {
-    // ignored — see comment above
-  }
 
   return video;
 }
