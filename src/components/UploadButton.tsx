@@ -30,6 +30,12 @@ export default function UploadButton({
         uploadFile = await compressVideo(file, setCompressionProgress);
       }
 
+      // Extract frames from a local blob: URL of the file already in the browser rather than the
+      // remote Supabase Storage URL — fetching a cross-origin video over a real network, with the
+      // CORS/range-request handling that requires, is a known source of hangs on mobile Safari.
+      // A same-origin blob needs neither.
+      const localUrl = URL.createObjectURL(uploadFile);
+
       setStatus("uploading");
       const upload = await uploadDrillVideo(playerId, drillId, uploadFile);
 
@@ -37,7 +43,11 @@ export default function UploadButton({
       // Starting with a single reference profile (Curry) to validate quality before
       // expanding to player-chosen profiles across the library.
       const referenceProfile = await getReferenceProfileByName("Stephen Curry");
-      await analysisClient.analyzeUpload(upload.id, upload.video_url, referenceProfile.id);
+      try {
+        await analysisClient.analyzeUpload(upload.id, localUrl, referenceProfile.id);
+      } finally {
+        URL.revokeObjectURL(localUrl);
+      }
 
       onDone();
     } catch (err) {

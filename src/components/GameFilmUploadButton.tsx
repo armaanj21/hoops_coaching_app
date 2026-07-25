@@ -25,7 +25,14 @@ export default function GameFilmUploadButton({
   const [compressionProgress, setCompressionProgress] = useState(0);
 
   const [pendingUploadId, setPendingUploadId] = useState<string | null>(null);
-  const [pendingVideoUrl, setPendingVideoUrl] = useState<string | null>(null);
+  // Frame extraction/marking reads from this local blob: URL of the file already sitting in the
+  // browser, not the remote Supabase Storage URL — fetching a cross-origin video over a real
+  // mobile network, with all the CORS/range-request quirks iOS Safari has around that, was
+  // causing extraction to hang or time out on-device even though it worked fine on desktop with
+  // small local test clips. A blob URL needs no network round trip and no cross-origin video
+  // element at all, so it sidesteps that whole class of failure for the parts of this flow that
+  // still have the original file in memory. Revoked once the upload flow finishes or resets.
+  const [pendingLocalUrl, setPendingLocalUrl] = useState<string | null>(null);
   const [referenceFrame, setReferenceFrame] = useState<string | null>(null);
   const [referenceFrameTime, setReferenceFrameTime] = useState<number | null>(null);
   const [pendingBox, setPendingBox] = useState<NormalizedBox | null>(null);
@@ -48,13 +55,15 @@ export default function GameFilmUploadButton({
         uploadFile = await compressVideo(file, setCompressionProgress);
       }
 
+      const localUrl = URL.createObjectURL(uploadFile);
+      setPendingLocalUrl(localUrl);
+
       setStatus("uploading");
       const upload = await uploadGameFilm(playerId, uploadFile, jerseyNumber, jerseyColor);
       setPendingUploadId(upload.id);
-      setPendingVideoUrl(upload.video_url);
 
       setStatus("extracting");
-      const frame = await extractFrameAt(upload.video_url);
+      const frame = await extractFrameAt(localUrl);
       setReferenceFrame(`data:image/jpeg;base64,${frame.base64}`);
       setReferenceFrameTime(frame.time);
       setStatus("marking");
@@ -75,11 +84,11 @@ export default function GameFilmUploadButton({
   // native resolution before any analysis call is made — not just that it looked right in the
   // (possibly downscaled) drag UI.
   async function handleMarkConfirmed(box: NormalizedBox) {
-    if (!pendingVideoUrl || referenceFrameTime === null) return;
+    if (!pendingLocalUrl || referenceFrameTime === null) return;
     setError(null);
     try {
       setStatus("confirming");
-      const markerFrame = await extractFrameAt(pendingVideoUrl, referenceFrameTime);
+      const markerFrame = await extractFrameAt(pendingLocalUrl, referenceFrameTime);
       const annotated = await annotateFrameWithBox(markerFrame.base64, box, markerFrame.width, markerFrame.height);
       console.log("[game-film debug] marker frame", {
         markerFrameTime: referenceFrameTime,
@@ -96,14 +105,16 @@ export default function GameFilmUploadButton({
   }
 
   async function handleDebugApproved() {
-    if (!pendingUploadId || !pendingVideoUrl || referenceFrameTime === null || !pendingBox) return;
+    if (!pendingUploadId || !pendingLocalUrl || referenceFrameTime === null || !pendingBox) return;
     setError(null);
     try {
       setStatus("analyzing");
       await saveMarker(pendingUploadId, referenceFrameTime, pendingBox);
+      // Also reads frames from the local blob URL, same reasoning as above — this still runs
+      // within the same page session, so the file is still in memory.
       await analyzeGameFilm(
         pendingUploadId,
-        pendingVideoUrl,
+        pendingLocalUrl,
         referenceProfileId,
         jerseyNumber,
         jerseyColor,
@@ -125,8 +136,9 @@ export default function GameFilmUploadButton({
   }
 
   function resetPending() {
+    if (pendingLocalUrl) URL.revokeObjectURL(pendingLocalUrl);
     setPendingUploadId(null);
-    setPendingVideoUrl(null);
+    setPendingLocalUrl(null);
     setReferenceFrame(null);
     setReferenceFrameTime(null);
     setPendingBox(null);

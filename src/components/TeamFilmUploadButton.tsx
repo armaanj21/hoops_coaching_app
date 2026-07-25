@@ -30,11 +30,19 @@ export default function TeamFilmUploadButton({
         uploadFile = await compressVideo(file, setCompressionProgress);
       }
 
+      // See UploadButton.tsx/GameFilmUploadButton.tsx for why this reads from a local blob: URL
+      // rather than the remote Storage URL — avoids the mobile Safari CORS/network hang.
+      const localUrl = URL.createObjectURL(uploadFile);
+
       setStatus("uploading");
       const upload = await uploadTeamFilm(teamId, coachId, uploadFile);
 
       setStatus("analyzing");
-      await analyzeTeamFilm(upload.id, upload.video_url);
+      try {
+        await analyzeTeamFilm(upload.id, localUrl);
+      } finally {
+        URL.revokeObjectURL(localUrl);
+      }
 
       onDone();
     } catch (err) {
