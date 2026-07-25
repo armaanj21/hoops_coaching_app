@@ -44,6 +44,10 @@ const ENCODE_TIMEOUT_MS = isMobile ? 120_000 : 60_000;
 // "Processing video..." spinner up forever with no way out.
 const LOAD_TIMEOUT_MS = 30_000;
 
+// A stream-copy remux (no re-encoding) is much faster than a full compress pass — this is a
+// generous ceiling, not an expected duration.
+const REMUX_TIMEOUT_MS = 30_000;
+
 let ffmpegInstance: FFmpeg | null = null;
 let ffmpegLoadPromise: Promise<FFmpeg> | null = null;
 
@@ -138,6 +142,15 @@ export class CompressionFailedError extends Error {
   }
 }
 
+export class VideoPreparationError extends Error {
+  constructor() {
+    super(
+      "This video is taking too long to prepare for analysis — it may use a format this browser struggles with. Try a shorter clip, or re-export it in a more compatible format (H.264 MP4) before uploading."
+    );
+    this.name = "VideoPreparationError";
+  }
+}
+
 async function encode(
   ffmpeg: FFmpeg,
   file: File,
@@ -192,6 +205,50 @@ async function encode(
   const data = await ffmpeg.readFile(outputName);
   await ffmpeg.deleteFile(outputName);
   return data as Uint8Array;
+}
+
+// Many phone-recorded videos (especially iPhone .mov/HEVC clips) store their frame index (the
+// `moov` atom) at the END of the file rather than the front. Browsers need that index before they
+// can seek at all — with it at the end, seeking (or sometimes even loading) can hang or take a
+// very long time, since the player effectively has to read through the whole file first just to
+// find it. This is the exact, well-documented problem `-movflags +faststart` exists to fix, by
+// rewriting the container to move the index to the front. compressVideo's own encode already sets
+// this flag on its output, but phone clips increasingly skip full compression entirely (see
+// COMPRESSION_THRESHOLD_MB above) and go straight to frame extraction — so this does a fast,
+// lossless stream-copy remux (no re-encoding, just rewriting the container) to guarantee every
+// uploaded video is seekable, regardless of whether it went through full compression.
+export async function ensureFastStart(file: File): Promise<File> {
+  const ffmpeg = await getFFmpeg();
+  const inputName = inputFileName(file);
+  const outputName = "faststart-output.mp4";
+  try {
+    await ffmpeg.writeFile(inputName, await fetchFile(file));
+    const returnCode = await withTimeout(
+      ffmpeg.exec(["-i", inputName, "-c", "copy", "-movflags", "+faststart", outputName], REMUX_TIMEOUT_MS),
+      REMUX_TIMEOUT_MS + 5_000,
+      () => new VideoPreparationError()
+    );
+    if (returnCode !== 0) throw new VideoPreparationError();
+    const data = (await ffmpeg.readFile(outputName)) as Uint8Array;
+    await ffmpeg.deleteFile(outputName);
+    await ffmpeg.deleteFile(inputName);
+    const blob = new Blob([data.buffer as BlobPart], { type: "video/mp4" });
+    const baseName = file.name.replace(/\.[^/.]+$/, "");
+    return new File([blob], `${baseName}-faststart.mp4`, { type: "video/mp4" });
+  } catch (err) {
+    if (err instanceof VideoPreparationError) {
+      // Same reasoning as compressVideo's catch: the worker may still be wedged after our race
+      // gave up on it, so drop the cached instance rather than let it poison the next attempt.
+      try {
+        ffmpeg.terminate();
+      } catch {
+        // best-effort; the worker may already be dead
+      }
+      ffmpegInstance = null;
+      ffmpegLoadPromise = null;
+    }
+    throw err;
+  }
 }
 
 // Compresses a video down toward the upload size limit by re-encoding at a computed bitrate

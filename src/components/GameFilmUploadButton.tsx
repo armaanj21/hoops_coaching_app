@@ -3,7 +3,7 @@ import { analyzeGameFilm } from "../lib/analysis/gameFilmAnalysisClient";
 import { annotateFrameWithBox, extractFrameAt, type NormalizedBox } from "../lib/analysis/frameExtraction";
 import { saveMarker, uploadGameFilm } from "../lib/gameFilm";
 import { MAX_UPLOAD_MB } from "../lib/storagePath";
-import { CompressionInsufficientError, compressVideo, needsCompression } from "../lib/videoCompression";
+import { CompressionInsufficientError, compressVideo, ensureFastStart, needsCompression } from "../lib/videoCompression";
 import PlayerMarker from "./PlayerMarker";
 
 type Status = "idle" | "processing" | "uploading" | "extracting" | "marking" | "confirming" | "analyzing";
@@ -53,6 +53,16 @@ export default function GameFilmUploadButton({
         setStatus("processing");
         setCompressionProgress(0);
         uploadFile = await compressVideo(file, setCompressionProgress);
+      } else {
+        // compressVideo's own encode always sets +faststart; when compression is skipped, do a
+        // cheap remux-only pass instead so frame extraction can still seek reliably. Best-effort —
+        // if this fails for some reason, fall back to the original file rather than blocking the
+        // whole upload on it.
+        try {
+          uploadFile = await ensureFastStart(file);
+        } catch {
+          uploadFile = file;
+        }
       }
 
       const localUrl = URL.createObjectURL(uploadFile);

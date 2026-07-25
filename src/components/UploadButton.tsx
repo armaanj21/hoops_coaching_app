@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { analysisClient } from "../lib/analysis/claudeAnalysisClient";
 import { getReferenceProfileByName, uploadDrillVideo } from "../lib/uploads";
 import { MAX_UPLOAD_MB } from "../lib/storagePath";
-import { CompressionInsufficientError, compressVideo, needsCompression } from "../lib/videoCompression";
+import { CompressionInsufficientError, compressVideo, ensureFastStart, needsCompression } from "../lib/videoCompression";
 
 export default function UploadButton({
   drillId,
@@ -28,6 +28,14 @@ export default function UploadButton({
         setStatus("processing");
         setCompressionProgress(0);
         uploadFile = await compressVideo(file, setCompressionProgress);
+      } else {
+        // See videoCompression.ts's ensureFastStart for why this runs when compression is
+        // skipped — best-effort, falls back to the original file if it fails.
+        try {
+          uploadFile = await ensureFastStart(file);
+        } catch {
+          uploadFile = file;
+        }
       }
 
       // Extract frames from a local blob: URL of the file already in the browser rather than the

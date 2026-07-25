@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { uploadTeamFilm } from "../lib/teamFilm";
 import { analyzeTeamFilm } from "../lib/analysis/teamFilmAnalysisClient";
 import { MAX_UPLOAD_MB } from "../lib/storagePath";
-import { CompressionInsufficientError, compressVideo, needsCompression } from "../lib/videoCompression";
+import { CompressionInsufficientError, compressVideo, ensureFastStart, needsCompression } from "../lib/videoCompression";
 
 export default function TeamFilmUploadButton({
   teamId,
@@ -28,6 +28,14 @@ export default function TeamFilmUploadButton({
         setStatus("processing");
         setCompressionProgress(0);
         uploadFile = await compressVideo(file, setCompressionProgress);
+      } else {
+        // See videoCompression.ts's ensureFastStart for why this runs when compression is
+        // skipped — best-effort, falls back to the original file if it fails.
+        try {
+          uploadFile = await ensureFastStart(file);
+        } catch {
+          uploadFile = file;
+        }
       }
 
       // See UploadButton.tsx/GameFilmUploadButton.tsx for why this reads from a local blob: URL
