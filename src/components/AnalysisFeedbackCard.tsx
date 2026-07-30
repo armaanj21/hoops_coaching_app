@@ -1,12 +1,31 @@
 import type { AnalysisResult } from "../types";
 
+const TIER_LABELS: Record<string, string> = {
+  needs_work: "Needs work",
+  developing: "Developing",
+  solid: "Solid",
+  excellent: "Excellent",
+};
+
 export default function AnalysisFeedbackCard({ result }: { result: AnalysisResult }) {
-  const { overall_note, form_feedback, reference_comparison, explanation } = result.structured_feedback;
+  const { overall_note, score, score_tier, done_well, form_feedback, next_steps } = result.structured_feedback;
 
   return (
     <div className="card">
-      <h3>Feedback vs. {result.reference_player_or_position}</h3>
+      <h3>
+        {result.reference_player_or_position} — {score}/10 ({TIER_LABELS[score_tier] ?? score_tier})
+      </h3>
       <p>{overall_note}</p>
+      {done_well.length > 0 && (
+        <>
+          <h4>What you're doing well</h4>
+          <ul>
+            {done_well.map((f, i) => (
+              <li key={i}>{f}</li>
+            ))}
+          </ul>
+        </>
+      )}
       {form_feedback.length > 0 && (
         <>
           <h4>What to fix</h4>
@@ -17,12 +36,16 @@ export default function AnalysisFeedbackCard({ result }: { result: AnalysisResul
           </ul>
         </>
       )}
-      <h4>How it compares</h4>
-      <p>{reference_comparison}</p>
-      <h4>Why it works</h4>
-      <p>
-        <em>{explanation}</em>
-      </p>
+      {next_steps.length > 0 && (
+        <>
+          <h4>Next steps</h4>
+          <ul>
+            {next_steps.map((f, i) => (
+              <li key={i}>{f}</li>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   );
 }

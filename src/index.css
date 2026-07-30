@@ -11,22 +11,121 @@ body {
 
 .topbar {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   padding: 0.75rem 1rem;
   background: #1e293b;
+  gap: 0.5rem;
 }
 
-.topbar nav a {
+.topbar-nav {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.topbar-nav a {
   color: #f8fafc;
-  margin-right: 1rem;
   text-decoration: none;
+  /* Text-sized links are well under the ~44px minimum tap target on their own — padding turns
+     each link into its own comfortably-tappable block instead of a thin line of text. */
+  padding: 0.625rem 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+
+.topbar-nav a.active {
+  color: #f97316;
+  font-weight: 600;
+}
+
+.topbar-user {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
 }
 
 main {
   padding: 1rem;
   max-width: 720px;
   margin: 0 auto;
+  /* Belt-and-suspenders against any element that ends up wider than the viewport (e.g. an
+     unexpectedly wide table or video) forcing the whole page to scroll horizontally. */
+  overflow-x: hidden;
+}
+
+/* --- Mobile nav: fixed bottom tab bar, not the desktop horizontal nav shrunk down --- */
+
+.bottom-tabbar {
+  display: none;
+}
+
+/* 700px roughly tracks where the horizontal nav starts being genuinely comfortable to use with a
+   mouse — below it, a phone-style bottom tab bar takes over instead of wrapping text links onto
+   extra lines, which is a shrunk desktop layout, not a mobile-native one. */
+@media (max-width: 700px) {
+  .topbar-nav {
+    display: none;
+  }
+
+  main {
+    /* Keeps content from being hidden behind the fixed bottom tab bar; the extra safe-area
+       amount accounts for the home-indicator inset on notched iPhones. */
+    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+
+  .bottom-tabbar {
+    display: flex;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10;
+    background: #1e293b;
+    border-top: 1px solid #334155;
+    padding: 0.25rem 0.125rem calc(0.25rem + env(safe-area-inset-bottom));
+    /* Lets the row scroll sideways instead of squeezing tabs illegibly thin if a role's full set
+       of items (coach or player, whichever is longer) doesn't comfortably fit a narrow screen. */
+    overflow-x: auto;
+  }
+
+  .bottom-tabbar .tab {
+    flex: 1 0 auto;
+    /* Tight enough that the busiest case — a player with no team yet, which temporarily adds a
+       6th "Join" tab — still fits 375-390px without scrolling; still comfortably over the ~44px
+       minimum tap width once combined with the 52px tap height. */
+    min-width: 52px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.15rem;
+    padding: 0.375rem 0.125rem;
+    min-height: 52px;
+    color: #94a3b8;
+    text-decoration: none;
+    background: none;
+    border: none;
+    font-weight: 500;
+    border-radius: 0.375rem;
+  }
+
+  .bottom-tabbar .tab-active {
+    color: #f97316;
+  }
+
+  .bottom-tabbar .tab-icon {
+    font-size: 1.25rem;
+    line-height: 1;
+  }
+
+  .bottom-tabbar .tab-label {
+    font-size: 0.65rem;
+    line-height: 1;
+    white-space: nowrap;
+  }
 }
 
 .card {
@@ -44,6 +143,14 @@ button {
   padding: 0.5rem 1rem;
   font-weight: 600;
   cursor: pointer;
+  /* ~44px is the commonly-cited minimum comfortable touch target (Apple HIG/WCAG) — the previous
+     padding alone landed around 35px tall, tight enough to cause mis-taps on a phone. */
+  min-height: 44px;
+  min-width: 44px;
+}
+
+button + button {
+  margin-left: 0.5rem;
 }
 
 input, select, textarea {
@@ -55,6 +162,55 @@ input, select, textarea {
   border: 1px solid #334155;
   background: #0f172a;
   color: #f8fafc;
+  min-height: 44px;
+  box-sizing: border-box;
+  /* iOS Safari auto-zooms the page on focusing any input with a computed font-size under 16px —
+     an easy-to-miss mobile-only annoyance since desktop testing never triggers it. */
+  font-size: 16px;
+}
+
+textarea {
+  min-height: 88px;
+}
+
+label:has(> input[type="checkbox"]), label:has(> input[type="radio"]) {
+  /* The checkbox/radio itself stays small (see below), but every one of these in the app is
+     wrapped in a <label> containing the option text — padding the label turns the whole row into
+     the actual tap target via normal label-click-toggles-input behavior, rather than requiring a
+     precise tap on the tiny box. */
+  display: block;
+  padding: 0.5rem 0;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+
+input[type="checkbox"], input[type="radio"] {
+  /* Native checkboxes/radios render at ~13px regardless of the block-level sizing above, which
+     is too small to tap reliably — the padded label above is what actually makes them
+     comfortable to use on a phone (making the box itself much larger would look oversized
+     against its label text). */
+  width: 20px;
+  height: 20px;
+  min-height: 0;
+  display: inline-block;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table-scroll {
+  /* Wraps every table render so an unexpectedly wide table scrolls within itself instead of
+     forcing the whole page to scroll horizontally on a narrow phone screen. */
+  overflow-x: auto;
+}
+
+th, td {
+  padding: 0.5rem;
+  text-align: left;
 }
 
 .game-film-result {

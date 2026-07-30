@@ -8,12 +8,6 @@ export interface UploadWithAnalysis extends Upload {
   users: { name: string } | null;
 }
 
-export async function getReferenceProfileByName(name: string): Promise<{ id: string; name: string }> {
-  const { data, error } = await supabase.from("reference_profiles").select("id, name").eq("name", name).single();
-  if (error) throw new Error(friendlyError(error, "Couldn't find that reference profile."));
-  return data;
-}
-
 export async function uploadDrillVideo(playerId: string, drillId: string, file: File): Promise<Upload> {
   const path = buildStorageObjectPath(playerId, file);
   const { error: uploadError } = await supabase.storage.from("uploads").upload(path, file);

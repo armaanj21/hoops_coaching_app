@@ -26,7 +26,7 @@ export async function getRoster(teamId: string): Promise<Profile[]> {
 export async function getDrills(): Promise<Drill[]> {
   const { data, error } = await supabase
     .from("drills")
-    .select("id, title, description, skill_category, reference_video_url")
+    .select("id, title, description, skill_category, reference_video_url, correct_form_description")
     .order("skill_category");
   if (error) throw new Error(friendlyError(error, "Couldn't load the drill library. Please try again."));
   return (data ?? []) as Drill[];

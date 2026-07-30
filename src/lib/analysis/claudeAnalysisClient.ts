@@ -9,16 +9,18 @@ const FEEDBACK_SCHEMA = {
   type: "object" as const,
   properties: {
     overall_note: { type: "string" as const },
+    score: { type: "integer" as const },
+    score_tier: { type: "string" as const, enum: ["needs_work", "developing", "solid", "excellent"] },
+    done_well: { type: "array" as const, items: { type: "string" as const } },
     form_feedback: { type: "array" as const, items: { type: "string" as const } },
-    reference_comparison: { type: "string" as const },
-    explanation: { type: "string" as const },
+    next_steps: { type: "array" as const, items: { type: "string" as const } },
   },
-  required: ["overall_note", "form_feedback", "reference_comparison", "explanation"],
+  required: ["overall_note", "score", "score_tier", "done_well", "form_feedback", "next_steps"],
   additionalProperties: false,
 };
 
 export class ClaudeAnalysisClient implements AnalysisClient {
-  async analyzeUpload(uploadId: string, videoUrl: string, referenceProfileId: string): Promise<AnalysisResult> {
+  async analyzeUpload(uploadId: string, videoUrl: string): Promise<AnalysisResult> {
     const { data: upload, error: uploadError } = await supabase
       .from("uploads")
       .select("drill_id")
@@ -28,17 +30,10 @@ export class ClaudeAnalysisClient implements AnalysisClient {
 
     const { data: drill, error: drillError } = await supabase
       .from("drills")
-      .select("title, description, skill_category")
+      .select("title, description, skill_category, correct_form_description")
       .eq("id", upload.drill_id)
       .single();
     if (drillError) throw new Error(friendlyError(drillError, "Couldn't load the drill for this upload."));
-
-    const { data: referenceProfile, error: refError } = await supabase
-      .from("reference_profiles")
-      .select("name, position, signature_moves, key_stats, summary")
-      .eq("id", referenceProfileId)
-      .single();
-    if (refError) throw new Error(friendlyError(refError, "Couldn't load your reference player."));
 
     const frames = await extractFrames(videoUrl, 3);
 
@@ -58,16 +53,16 @@ export class ClaudeAnalysisClient implements AnalysisClient {
               type: "text" as const,
               text: `These are frames from a player's video performing the drill "${drill.title}" (${drill.skill_category}): ${drill.description}
 
-The player wants to style their game after ${referenceProfile.name} (${referenceProfile.position}).
-Reference signature moves: ${JSON.stringify(referenceProfile.signature_moves)}
-Reference key stats: ${JSON.stringify(referenceProfile.key_stats)}
-Reference summary: ${referenceProfile.summary}
+Correct form for this specific drill:
+${drill.correct_form_description}
 
-Analyze the player's form in these frames compared to the reference. Return structured feedback:
-- overall_note: a short summary of the player's form
-- form_feedback: an array of specific, actionable things to fix
-- reference_comparison: how their form compares to ${referenceProfile.name}'s form for this specific move
-- explanation: the reasoning or stat behind why the reference's form works this way — this is the analytical layer, not just a score`,
+Grade the player's execution in these frames against that correct form — not against a reference NBA player, against this drill's own mechanics. Return structured feedback:
+- overall_note: a short summary of the player's execution on this specific drill
+- score: an integer 1-10 rating of how closely their form matches the correct form described above (10 = matches it closely, 1 = far off)
+- score_tier: "needs_work" (1-3), "developing" (4-6), "solid" (7-8), or "excellent" (9-10) — must be consistent with the numeric score
+- done_well: specific things visible in these frames that DO match the correct form
+- form_feedback: specific things visible in these frames that DON'T match the correct form — concrete and tied to this drill's actual mechanics, not generic advice
+- next_steps: 2-4 specific things to focus on before retrying this drill, ordered by priority`,
             },
           ],
         },
@@ -78,7 +73,7 @@ Analyze the player's form in these frames compared to the reference. Return stru
       .from("analysis_results")
       .insert({
         upload_id: uploadId,
-        reference_player_or_position: referenceProfile.name,
+        reference_player_or_position: drill.title,
         feedback_text: structured_feedback.overall_note,
         structured_feedback,
       })

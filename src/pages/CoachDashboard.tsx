@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import type { Drill, DrillFeedbackSummary, Profile, Team } from "../types";
+import type { Drill, DrillFeedbackSummary, LeaderboardEntry, Profile, Team } from "../types";
 import { assignDrill, getDrills, getMyTeam, getRoster } from "../lib/teams";
 import { getDrillFeedbackSummary } from "../lib/drillFeedback";
 import { getPlayerAnalysisHistory } from "../lib/progress";
 import { createIssueDrillLink } from "../lib/issueDrillLinks";
+import { getTeamLeaderboard } from "../lib/leaderboard";
 import RosterList from "../components/RosterList";
+import Leaderboard from "../components/Leaderboard";
 
 // Flattened for the "address this issue" picker: one option per issue string, tagged with which
 // analysis it came from so a link can be created against the right analysis_result.
@@ -18,6 +20,7 @@ export default function CoachDashboard({ profile }: { profile: Profile }) {
   const [roster, setRoster] = useState<Profile[]>([]);
   const [drills, setDrills] = useState<Drill[]>([]);
   const [feedbackSummary, setFeedbackSummary] = useState<DrillFeedbackSummary[]>([]);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -47,12 +50,14 @@ export default function CoachDashboard({ profile }: { profile: Profile }) {
       setTeam(teamData);
       setDrills(drillsData);
       if (teamData) {
-        const [rosterData, feedbackData] = await Promise.all([
+        const [rosterData, feedbackData, leaderboardData] = await Promise.all([
           getRoster(teamData.id),
           getDrillFeedbackSummary(teamData.id),
+          getTeamLeaderboard(teamData.id),
         ]);
         setRoster(rosterData);
         setFeedbackSummary(feedbackData);
+        setLeaderboard(leaderboardData);
       }
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Failed to load dashboard data.");
@@ -140,6 +145,11 @@ export default function CoachDashboard({ profile }: { profile: Profile }) {
   return (
     <div>
       <h1>Coach Dashboard</h1>
+      <div className="card">
+        <h2>Leaderboard</h2>
+        <p style={{ fontSize: "0.85em", opacity: 0.75 }}>Drills completed — consistency, not skill ranking.</p>
+        <Leaderboard entries={leaderboard} />
+      </div>
       <div className="card">
         <h2>Roster</h2>
         <RosterList players={roster} />

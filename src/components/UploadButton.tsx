@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { analysisClient } from "../lib/analysis/claudeAnalysisClient";
-import { getReferenceProfileByName, uploadDrillVideo } from "../lib/uploads";
+import { uploadDrillVideo } from "../lib/uploads";
 import { MAX_UPLOAD_MB } from "../lib/storagePath";
 import { CompressionInsufficientError, compressVideo, ensureFastStart, needsCompression } from "../lib/videoCompression";
 
@@ -48,11 +48,8 @@ export default function UploadButton({
       const upload = await uploadDrillVideo(playerId, drillId, uploadFile);
 
       setStatus("analyzing");
-      // Starting with a single reference profile (Curry) to validate quality before
-      // expanding to player-chosen profiles across the library.
-      const referenceProfile = await getReferenceProfileByName("Stephen Curry");
       try {
-        await analysisClient.analyzeUpload(upload.id, localUrl, referenceProfile.id);
+        await analysisClient.analyzeUpload(upload.id, localUrl);
       } finally {
         URL.revokeObjectURL(localUrl);
       }
@@ -78,7 +75,7 @@ export default function UploadButton({
       </p>
       {status === "processing" && <p>Processing video... {Math.round(compressionProgress * 100)}%</p>}
       {status === "uploading" && <p>Uploading video...</p>}
-      {status === "analyzing" && <p>Analyzing your form against Stephen Curry...</p>}
+      {status === "analyzing" && <p>Grading your form against this drill's correct technique...</p>}
       {error && <p style={{ color: "#f87171" }}>{error}</p>}
     </div>
   );

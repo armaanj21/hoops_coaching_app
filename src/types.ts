@@ -23,6 +23,7 @@ export interface Drill {
   description: string;
   skill_category: SkillCategory;
   reference_video_url: string | null;
+  correct_form_description: string;
 }
 
 export type AssignmentStatus = "assigned" | "in_progress" | "completed";
@@ -74,11 +75,20 @@ export interface Upload {
   marker_height: number | null;
 }
 
+export type DrillScoreTier = "needs_work" | "developing" | "solid" | "excellent";
+
 export interface StructuredFeedback {
   overall_note: string;
+  // Graded against the drill's own correct-form description, not a reference NBA player — score
+  // and technique breakdown are specific to this drill's actual mechanics.
+  score: number;
+  score_tier: DrillScoreTier;
+  done_well: string[];
+  // "Things needing work" — kept under the same field name as before (rather than a new
+  // `needs_work`) so progress-tracking/pattern-detection, which already reads this field for
+  // every "drill" kind analysis to extract flagged issues, keeps working unchanged.
   form_feedback: string[];
-  reference_comparison: string;
-  explanation: string;
+  next_steps: string[];
 }
 
 export interface AnalysisResult {
@@ -195,4 +205,12 @@ export interface IssueOutcome {
   nextAnalysisId: string | null;
   reappeared: boolean | null;
   narration: string | null;
+}
+
+export interface LeaderboardEntry {
+  playerId: string;
+  playerName: string;
+  completionsThisWeek: number;
+  completionsThisMonth: number;
+  totalCompletions: number;
 }

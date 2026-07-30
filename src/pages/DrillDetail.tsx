@@ -25,7 +25,7 @@ export default function DrillDetail({ profile }: { profile: Profile }) {
     try {
       const { data: drillData, error: drillError } = await supabase
         .from("drills")
-        .select("id, title, description, skill_category, reference_video_url")
+        .select("id, title, description, skill_category, reference_video_url, correct_form_description")
         .eq("id", id)
         .single();
       if (drillError) throw new Error(friendlyError(drillError, "Couldn't load this drill. Please try again."));
@@ -51,6 +51,9 @@ export default function DrillDetail({ profile }: { profile: Profile }) {
         <p>{drill.description}</p>
         <p>
           <strong>Category:</strong> {drill.skill_category}
+        </p>
+        <p>
+          <strong>Correct form:</strong> {drill.correct_form_description}
         </p>
         {profile.role === "player" && (
           <UploadButton drillId={drillId} playerId={profile.id} onDone={() => void loadData(drillId)} />
