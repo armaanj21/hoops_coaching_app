@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { getSession, logOut } from "./lib/auth";
+import { getSession, logOut, clearLocalSession } from "./lib/auth";
+import { supabase } from "./lib/supabaseClient";
 import type { Profile } from "./types";
 import NavBar from "./components/NavBar";
 import Login from "./pages/Login";
@@ -18,6 +19,48 @@ import TeamFilm from "./pages/TeamFilm";
 
 export default function App() {
   const [profile, setProfile] = useState<Profile | null>(getSession());
+  // The cached profile above is just this app's own lightweight "who am I" record in
+  // localStorage — it says nothing about whether the underlying Supabase auth session is still
+  // valid. If that session's refresh token has expired or been revoked (realistically: the tab
+  // was left logged in across many days of testing), every Supabase query then runs
+  // unauthenticated, and RLS silently returns empty results rather than an error — the app looks
+  // logged in but quietly shows "no data" everywhere, which is exactly what surfaced as this
+  // page's "No profiles loaded yet." with nothing else wrong on screen. Verifying the real
+  // session on load (and reacting if it's invalidated later) closes that gap.
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+
+    async function verifySession() {
+      const { data } = await supabase.auth.getSession();
+      if (!active) return;
+      if (!data.session && getSession()) {
+        // No real session behind the cache — nothing to sign out of, and calling
+        // supabase.auth.signOut() here can hang indefinitely with no session to act on.
+        clearLocalSession();
+        setProfile(null);
+      }
+      setCheckingSession(false);
+    }
+    void verifySession();
+
+    // supabase-js fires SIGNED_OUT itself when a background token refresh fails (e.g. the
+    // refresh token expired or was revoked), not a distinct "refresh failed" event — so this one
+    // check also covers that case, not just an explicit signOut() call.
+    const { data: subscription } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "SIGNED_OUT") {
+        logOut();
+        setProfile(null);
+      }
+    });
+
+    return () => {
+      active = false;
+      subscription.subscription.unsubscribe();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function handleAuthed(next: Profile) {
     setProfile(next);
@@ -29,6 +72,8 @@ export default function App() {
   }
 
   const home = profile?.role === "coach" ? "/coach" : "/player";
+
+  if (checkingSession) return null;
 
   return (
     <BrowserRouter>

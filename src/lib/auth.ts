@@ -80,6 +80,13 @@ export function logOut() {
   void supabase.auth.signOut();
 }
 
+// Clears the cached profile without calling supabase.auth.signOut() — used when we've already
+// determined there's no real Supabase session behind the cache, since signing out of a session
+// that doesn't exist has nothing to do and, worse, can hang indefinitely.
+export function clearLocalSession() {
+  localStorage.removeItem(SESSION_KEY);
+}
+
 export function updateSessionProfile(profile: Profile): void {
   saveSession(profile);
 }
