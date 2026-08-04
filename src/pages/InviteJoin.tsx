@@ -19,7 +19,7 @@ export default function InviteJoin({
 
   return (
     <div className="card">
-      <h1>Join a team</h1>
+      <h1>Join a Team</h1>
       <p>Enter the invite code your coach shared with you.</p>
       <form onSubmit={handleSubmit}>
         <input placeholder="Invite code" value={code} onChange={(e) => setCode(e.target.value)} required />

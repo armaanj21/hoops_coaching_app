@@ -21,7 +21,7 @@ export default function Login({ onAuthed }: { onAuthed: (profile: Profile) => vo
 
   return (
     <div className="card">
-      <h1>Log in</h1>
+      <h1>Log In</h1>
       <form onSubmit={handleSubmit}>
         <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
         <input

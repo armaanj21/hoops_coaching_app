@@ -1,12 +1,67 @@
 :root {
   color-scheme: dark;
   font-family: system-ui, -apple-system, sans-serif;
+
+  /* Shared spacing scale — every gap/padding/margin in this file should reference one of these
+     rather than a one-off value, so the app's rhythm stays consistent as pages are added. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
 }
 
 body {
   margin: 0;
   background: #0f172a;
   color: #f8fafc;
+}
+
+/* Consistent vertical rhythm between a page's top-level sections (heading, cards, etc.) — every
+   page's root element sits directly inside <main>, so this one rule spaces every page without
+   needing per-page margin tweaks. */
+main > * > * + * {
+  margin-top: var(--space-5);
+}
+
+h1 {
+  margin: 0 0 var(--space-2) 0;
+}
+
+h2 {
+  margin: 0 0 var(--space-3) 0;
+}
+
+h3 {
+  margin: 0 0 var(--space-2) 0;
+}
+
+h4 {
+  margin: var(--space-3) 0 var(--space-2) 0;
+}
+
+p {
+  margin: 0 0 var(--space-3) 0;
+}
+
+p:last-child {
+  margin-bottom: 0;
+}
+
+/* Spaces out a card's own contents (heading, paragraphs, form, buttons) so they don't run
+   together — separate from the vertical rhythm between cards themselves. */
+.card > * + * {
+  margin-top: var(--space-3);
+}
+
+ul, ol {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+li + li {
+  margin-top: var(--space-2);
 }
 
 .topbar {
@@ -48,7 +103,7 @@ body {
 }
 
 main {
-  padding: 1rem;
+  padding: var(--space-6) var(--space-4);
   max-width: 720px;
   margin: 0 auto;
   /* Belt-and-suspenders against any element that ends up wider than the viewport (e.g. an
@@ -131,8 +186,14 @@ main {
 .card {
   background: #1e293b;
   border-radius: 0.5rem;
-  padding: 1rem;
-  margin-bottom: 0.75rem;
+  padding: var(--space-5);
+  margin-bottom: var(--space-4);
+}
+
+/* A card nested inside another card (e.g. a per-item summary within a section) sits in a tighter
+   context than a top-level one — full padding on both would compound into excessive whitespace. */
+.card .card {
+  padding: var(--space-4);
 }
 
 button {
@@ -150,14 +211,14 @@ button {
 }
 
 button + button {
-  margin-left: 0.5rem;
+  margin-left: var(--space-3);
 }
 
 input, select, textarea {
   display: block;
   width: 100%;
-  margin-bottom: 0.5rem;
-  padding: 0.5rem;
+  margin-bottom: var(--space-3);
+  padding: var(--space-2);
   border-radius: 0.375rem;
   border: 1px solid #334155;
   background: #0f172a;
@@ -171,6 +232,14 @@ input, select, textarea {
 
 textarea {
   min-height: 88px;
+}
+
+form > * + * {
+  margin-top: var(--space-3);
+}
+
+label {
+  display: block;
 }
 
 label:has(> input[type="checkbox"]), label:has(> input[type="radio"]) {
